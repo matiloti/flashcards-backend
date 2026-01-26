@@ -9,25 +9,27 @@ import java.util.UUID
 @Repository
 class StudyRepository(private val jdbcTemplate: JdbcTemplate) {
 
-    fun createSession(deckId: UUID): StudySession {
+    fun createSession(deckId: UUID, sessionType: SessionType = SessionType.STUDY): StudySession {
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
-            "INSERT INTO study_sessions (id, deck_id, started_at) VALUES (?, ?, ?)",
-            id, deckId, Timestamp.from(now)
+            "INSERT INTO study_sessions (id, deck_id, session_type, started_at) VALUES (?, ?, ?, ?)",
+            id, deckId, sessionType.name, Timestamp.from(now)
         )
-        return StudySession(id = id, deckId = deckId, startedAt = now)
+        return StudySession(id = id, deckId = deckId, sessionType = sessionType, startedAt = now)
     }
 
     fun findSessionById(sessionId: UUID): StudySession? {
         val results = jdbcTemplate.query(
-            "SELECT id, deck_id, started_at, completed_at FROM study_sessions WHERE id = ?",
+            "SELECT id, deck_id, session_type, started_at, completed_at, concepts_viewed FROM study_sessions WHERE id = ?",
             { rs, _ ->
                 StudySession(
                     id = UUID.fromString(rs.getString("id")),
                     deckId = UUID.fromString(rs.getString("deck_id")),
+                    sessionType = SessionType.valueOf(rs.getString("session_type")),
                     startedAt = rs.getTimestamp("started_at").toInstant(),
-                    completedAt = rs.getTimestamp("completed_at")?.toInstant()
+                    completedAt = rs.getTimestamp("completed_at")?.toInstant(),
+                    conceptsViewed = rs.getObject("concepts_viewed") as? Int
                 )
             },
             sessionId
@@ -50,6 +52,15 @@ class StudyRepository(private val jdbcTemplate: JdbcTemplate) {
         jdbcTemplate.update(
             "UPDATE study_sessions SET completed_at = ? WHERE id = ?",
             Timestamp.from(now), sessionId
+        )
+        return now
+    }
+
+    fun completeFlashReviewSession(sessionId: UUID, conceptsViewed: Int?): Instant {
+        val now = Instant.now()
+        jdbcTemplate.update(
+            "UPDATE study_sessions SET completed_at = ?, concepts_viewed = ? WHERE id = ?",
+            Timestamp.from(now), conceptsViewed, sessionId
         )
         return now
     }

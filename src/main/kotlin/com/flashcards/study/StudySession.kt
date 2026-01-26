@@ -3,11 +3,18 @@ package com.flashcards.study
 import java.time.Instant
 import java.util.UUID
 
+enum class SessionType {
+    STUDY,
+    FLASH_REVIEW
+}
+
 data class StudySession(
     val id: UUID,
     val deckId: UUID,
+    val sessionType: SessionType = SessionType.STUDY,
     val startedAt: Instant,
-    val completedAt: Instant? = null
+    val completedAt: Instant? = null,
+    val conceptsViewed: Int? = null
 )
 
 data class CardReview(
