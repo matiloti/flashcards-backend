@@ -1,0 +1,14 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:flashcards}
+    username: ${DB_USER:flashcards}
+    password: ${DB_PASS:flashcards}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
