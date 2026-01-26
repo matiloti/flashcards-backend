@@ -120,6 +120,45 @@ class StudyControllerRetakeTest {
     }
 
     @Test
+    fun `retake missed returns correct card IDs not all cards`() {
+        // BUG REPRODUCTION TEST: Verify that retake returns only missed card IDs
+        // This test explicitly checks the card IDs to ensure the EASY card is excluded
+        val sessionId = startAndCompleteSession(
+            card1Id to "EASY",   // Should NOT be in retake
+            card2Id to "HARD",   // Should be in retake
+            card3Id to "AGAIN"   // Should be in retake
+        )
+
+        // Call retake-missed and capture the response
+        val result = mockMvc.perform(
+            post("/api/v1/study/$sessionId/retake-missed")
+        )
+            .andExpect(status().isCreated)
+            .andReturn()
+
+        val responseJson = objectMapper.readTree(result.response.contentAsString)
+        val returnedCardIds = responseJson["cards"].map { it["id"].asText() }.toSet()
+
+        // Verify EASY card (card1) is NOT included
+        assert(!returnedCardIds.contains(card1Id)) {
+            "BUG: card1 (rated EASY) should not be in retake, but was found in: $returnedCardIds"
+        }
+
+        // Verify HARD and AGAIN cards ARE included
+        assert(returnedCardIds.contains(card2Id)) {
+            "card2 (rated HARD) should be in retake but was not found"
+        }
+        assert(returnedCardIds.contains(card3Id)) {
+            "card3 (rated AGAIN) should be in retake but was not found"
+        }
+
+        // Verify total count
+        assert(returnedCardIds.size == 2) {
+            "Expected exactly 2 cards but got ${returnedCardIds.size}: $returnedCardIds"
+        }
+    }
+
+    @Test
     fun `retake missed returns 400 when session not completed`() {
         // Start session but don't complete it
         val sessionResult = mockMvc.perform(
