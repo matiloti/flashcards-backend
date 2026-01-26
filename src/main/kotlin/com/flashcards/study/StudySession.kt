@@ -14,7 +14,9 @@ data class StudySession(
     val sessionType: SessionType = SessionType.STUDY,
     val startedAt: Instant,
     val completedAt: Instant? = null,
-    val conceptsViewed: Int? = null
+    val conceptsViewed: Int? = null,
+    val parentSessionId: UUID? = null,
+    val retakeType: RetakeType? = null
 )
 
 data class CardReview(
@@ -65,6 +67,25 @@ data class SessionSummary(
     val easyCount: Int,
     val hardCount: Int,
     val againCount: Int,
+    val missedCount: Int,
+    val parentSessionId: UUID?,
+    val retakeType: RetakeType?,
     val startedAt: Instant,
     val completedAt: Instant
+)
+
+data class RetakeMissedResponse(
+    val sessionId: UUID,
+    val deckId: UUID,
+    val deckName: String,
+    val parentSessionId: UUID,
+    val retakeType: RetakeType,
+    val cards: List<StudyCard>,
+    val totalCards: Int,
+    val originalSessionCards: Int,
+    val startedAt: Instant
+)
+
+data class ErrorResponse(
+    val error: String
 )
