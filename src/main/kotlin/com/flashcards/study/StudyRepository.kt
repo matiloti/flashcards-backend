@@ -97,15 +97,19 @@ class StudyRepository(private val jdbcTemplate: JdbcTemplate) {
 
     /**
      * Find all missed cards (HARD or AGAIN) from a session that still exist in the deck.
-     * Returns cards with their front/back text for study.
+     * Returns cards with their front/back text for study, in random order.
      */
     fun findMissedCardsBySessionId(sessionId: UUID): List<StudyCard> {
+        // Use a subquery for DISTINCT, then ORDER BY RANDOM() on the outer query
+        // This avoids PostgreSQL error: "for SELECT DISTINCT, ORDER BY expressions must appear in select list"
         return jdbcTemplate.query(
-            """SELECT DISTINCT c.id, c.front_text, c.back_text
-               FROM card_reviews cr
-               JOIN cards c ON cr.card_id = c.id
-               WHERE cr.session_id = ?
-                 AND cr.rating IN ('HARD', 'AGAIN')
+            """SELECT id, front_text, back_text FROM (
+                   SELECT DISTINCT c.id, c.front_text, c.back_text
+                   FROM card_reviews cr
+                   JOIN cards c ON cr.card_id = c.id
+                   WHERE cr.session_id = ?
+                     AND cr.rating IN ('HARD', 'AGAIN')
+               ) AS missed_cards
                ORDER BY RANDOM()""",
             { rs, _ ->
                 StudyCard(
@@ -121,6 +125,8 @@ class StudyRepository(private val jdbcTemplate: JdbcTemplate) {
     /**
      * Count the number of unique missed cards (HARD or AGAIN) in a session.
      * Only counts cards that still exist in the deck.
+     * Note: Due to ON DELETE CASCADE on card_reviews.card_id, if cards are deleted,
+     * their reviews are also deleted, so this count will be 0.
      */
     fun countMissedCards(sessionId: UUID): Int {
         return jdbcTemplate.queryForObject(

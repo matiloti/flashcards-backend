@@ -110,16 +110,12 @@ class StudyController(
         val missedCards = studyRepository.findMissedCardsBySessionId(sessionId)
 
         // Validate at least one missed card exists
+        // Note: Due to ON DELETE CASCADE on card_reviews.card_id, if all missed cards
+        // are deleted, their reviews are also deleted. This makes it indistinguishable
+        // from sessions that had no missed cards originally.
         if (missedCards.isEmpty()) {
-            // Check if there were missed cards that got deleted
-            val originalMissedCount = studyRepository.countMissedCards(sessionId)
-            return if (originalMissedCount == 0) {
-                ResponseEntity.badRequest()
-                    .body(ErrorResponse("Cannot retake: no cards were rated Hard or Again in this session"))
-            } else {
-                ResponseEntity.badRequest()
-                    .body(ErrorResponse("Cannot retake: all missed cards have been deleted from the deck"))
-            }
+            return ResponseEntity.badRequest()
+                .body(ErrorResponse("Cannot retake: no cards were rated Hard or Again in this session"))
         }
 
         // Get original session card count

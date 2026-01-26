@@ -168,15 +168,15 @@ class StudyControllerRetakeTest {
             card3Id to "EASY"
         )
 
-        // Delete the deck
+        // Delete the deck (CASCADE deletes the session too)
         mockMvc.perform(delete("/api/v1/decks/$deckId"))
 
-        // Try to retake
+        // Try to retake - session no longer exists due to CASCADE
         mockMvc.perform(
             post("/api/v1/study/$sessionId/retake-missed")
         )
             .andExpect(status().isNotFound)
-            .andExpect(jsonPath("$.error").value("Cannot retake: deck no longer exists"))
+            .andExpect(jsonPath("$.error").value("Session not found"))
     }
 
     @Test
@@ -188,15 +188,17 @@ class StudyControllerRetakeTest {
             card3Id to "EASY"
         )
 
-        // Delete the missed card
+        // Delete the missed card (CASCADE also deletes the card_review)
         mockMvc.perform(delete("/api/v1/decks/$deckId/cards/$card2Id"))
 
-        // Try to retake
+        // Try to retake - since card_reviews uses ON DELETE CASCADE,
+        // the review for the deleted card is also removed, making it
+        // indistinguishable from "no missed cards originally"
         mockMvc.perform(
             post("/api/v1/study/$sessionId/retake-missed")
         )
             .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.error").value("Cannot retake: all missed cards have been deleted from the deck"))
+            .andExpect(jsonPath("$.error").value("Cannot retake: no cards were rated Hard or Again in this session"))
     }
 
     @Test
