@@ -93,16 +93,13 @@ class CardControllerTest {
     }
 
     @Test
-    fun `create card with empty backText returns 201`() {
+    fun `create card with empty backText returns 400`() {
         mockMvc.perform(
             post("/api/v1/decks/$deckId/cards")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"frontText": "Question without answer?", "backText": ""}""")
         )
-            .andExpect(status().isCreated)
-            .andExpect(jsonPath("$.frontText").value("Question without answer?"))
-            .andExpect(jsonPath("$.backText").value(""))
-            .andExpect(jsonPath("$.deckId").value(deckId))
+            .andExpect(status().isBadRequest)
     }
 
     @Test
@@ -141,7 +138,7 @@ class CardControllerTest {
     }
 
     @Test
-    fun `update card with empty backText returns 200`() {
+    fun `update card with empty backText returns 400`() {
         val createResult = mockMvc.perform(
             post("/api/v1/decks/$deckId/cards")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -155,9 +152,7 @@ class CardControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"frontText": "Question", "backText": ""}""")
         )
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.frontText").value("Question"))
-            .andExpect(jsonPath("$.backText").value(""))
+            .andExpect(status().isBadRequest)
     }
 
     @Test

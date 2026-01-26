@@ -36,7 +36,7 @@ class CardController(
         val frontText = request.frontText.trim()
         val backText = request.backText.trim()
 
-        if (frontText.isBlank() || frontText.length > 500 || backText.length > 500) {
+        if (frontText.isBlank() || frontText.length > 500 || backText.isBlank() || backText.length > 500) {
             return ResponseEntity.badRequest().build()
         }
 
@@ -55,7 +55,7 @@ class CardController(
         val frontText = request.frontText.trim()
         val backText = request.backText.trim()
 
-        if (frontText.isBlank() || frontText.length > 500 || backText.length > 500) {
+        if (frontText.isBlank() || frontText.length > 500 || backText.isBlank() || backText.length > 500) {
             return ResponseEntity.badRequest().build()
         }
 
