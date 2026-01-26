@@ -233,4 +233,180 @@ class DeckControllerTest {
             .andExpect(jsonPath("$[?(@.name == 'Study')].type").value("STUDY"))
             .andExpect(jsonPath("$[?(@.name == 'Flash')].type").value("FLASH_REVIEW"))
     }
+
+    // ==================== lastStudiedAt Tests ====================
+
+    @Test
+    fun `deck with completed study sessions returns lastStudiedAt as max completed_at`() {
+        // Create deck
+        val createResult = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Studied Deck"}""")
+        )
+            .andExpect(status().isCreated)
+            .andReturn()
+
+        val deckId = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(createResult.response.contentAsString)["id"].asText()
+
+        // Insert completed study sessions directly via SQL
+        val session1Time = java.sql.Timestamp.valueOf("2026-01-25 10:00:00")
+        val session2Time = java.sql.Timestamp.valueOf("2026-01-26 14:30:00")  // This is the MAX
+        val session3Time = java.sql.Timestamp.valueOf("2026-01-24 08:00:00")
+
+        jdbcTemplate.update(
+            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), ?)",
+            deckId, session1Time
+        )
+        jdbcTemplate.update(
+            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), ?)",
+            deckId, session2Time
+        )
+        jdbcTemplate.update(
+            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), ?)",
+            deckId, session3Time
+        )
+
+        // Verify GET by ID returns correct lastStudiedAt
+        mockMvc.perform(get("/api/v1/decks/$deckId"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lastStudiedAt").value("2026-01-26T13:30:00Z"))  // UTC conversion
+
+        // Verify list also returns correct lastStudiedAt
+        mockMvc.perform(get("/api/v1/decks"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].lastStudiedAt").value("2026-01-26T13:30:00Z"))
+    }
+
+    @Test
+    fun `deck with no study sessions returns null lastStudiedAt`() {
+        // Create deck without any study sessions
+        val createResult = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Never Studied Deck"}""")
+        )
+            .andExpect(status().isCreated)
+            .andReturn()
+
+        val deckId = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(createResult.response.contentAsString)["id"].asText()
+
+        // Verify GET by ID returns null lastStudiedAt
+        mockMvc.perform(get("/api/v1/decks/$deckId"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lastStudiedAt").value(null as Any?))
+
+        // Verify list also returns null lastStudiedAt
+        mockMvc.perform(get("/api/v1/decks"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].lastStudiedAt").value(null as Any?))
+    }
+
+    @Test
+    fun `deck with only incomplete sessions returns null lastStudiedAt`() {
+        // Create deck
+        val createResult = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Incomplete Sessions Deck"}""")
+        )
+            .andExpect(status().isCreated)
+            .andReturn()
+
+        val deckId = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(createResult.response.contentAsString)["id"].asText()
+
+        // Insert incomplete study sessions (completed_at IS NULL)
+        jdbcTemplate.update(
+            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), NULL)",
+            deckId
+        )
+        jdbcTemplate.update(
+            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), NULL)",
+            deckId
+        )
+
+        // Verify GET by ID returns null lastStudiedAt
+        mockMvc.perform(get("/api/v1/decks/$deckId"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lastStudiedAt").value(null as Any?))
+    }
+
+    @Test
+    fun `newly created deck has null lastStudiedAt`() {
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Brand New Deck"}""")
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.lastStudiedAt").value(null as Any?))
+    }
+
+    @Test
+    fun `mixed decks in list have correct lastStudiedAt values`() {
+        // Create deck 1: with completed sessions
+        val result1 = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Deck With Sessions"}""")
+        ).andReturn()
+        val deckId1 = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(result1.response.contentAsString)["id"].asText()
+
+        // Create deck 2: no sessions
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Deck No Sessions"}""")
+        )
+
+        // Create deck 3: only incomplete sessions
+        val result3 = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Deck Incomplete Only"}""")
+        ).andReturn()
+        val deckId3 = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(result3.response.contentAsString)["id"].asText()
+
+        // Add completed session to deck 1
+        val sessionTime = java.sql.Timestamp.valueOf("2026-01-26 12:00:00")
+        jdbcTemplate.update(
+            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), ?)",
+            deckId1, sessionTime
+        )
+
+        // Add incomplete session to deck 3
+        jdbcTemplate.update(
+            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), NULL)",
+            deckId3
+        )
+
+        // Verify list returns correct values for all - using direct index access after verifying the data
+        val response = mockMvc.perform(get("/api/v1/decks"))
+            .andExpect(status().isOk)
+            .andReturn()
+
+        val responseJson = response.response.contentAsString
+        val objectMapper = com.fasterxml.jackson.databind.ObjectMapper()
+        val decks = objectMapper.readTree(responseJson)
+
+        // Find each deck and verify lastStudiedAt
+        for (deck in decks) {
+            when (deck["name"].asText()) {
+                "Deck With Sessions" -> {
+                    org.junit.jupiter.api.Assertions.assertEquals("2026-01-26T11:00:00Z", deck["lastStudiedAt"].asText())
+                }
+                "Deck No Sessions" -> {
+                    org.junit.jupiter.api.Assertions.assertTrue(deck["lastStudiedAt"].isNull)
+                }
+                "Deck Incomplete Only" -> {
+                    org.junit.jupiter.api.Assertions.assertTrue(deck["lastStudiedAt"].isNull)
+                }
+            }
+        }
+    }
 }

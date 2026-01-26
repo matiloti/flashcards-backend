@@ -11,11 +11,13 @@ import java.util.UUID
 class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
 
     private val rowMapper = RowMapper { rs: ResultSet, _: Int ->
+        val lastStudiedAtTimestamp = rs.getTimestamp("last_studied_at")
         Deck(
             id = UUID.fromString(rs.getString("id")),
             name = rs.getString("name"),
             type = DeckType.valueOf(rs.getString("deck_type")),
             cardCount = rs.getInt("card_count"),
+            lastStudiedAt = lastStudiedAtTimestamp?.toInstant(),
             createdAt = rs.getTimestamp("created_at").toInstant(),
             updatedAt = rs.getTimestamp("updated_at").toInstant()
         )
@@ -25,9 +27,11 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
         return jdbcTemplate.query(
             """
             SELECT d.id, d.name, d.deck_type, d.created_at, d.updated_at,
-                   COUNT(c.id) AS card_count
+                   COUNT(DISTINCT c.id) AS card_count,
+                   MAX(ss.completed_at) AS last_studied_at
             FROM decks d
             LEFT JOIN cards c ON c.deck_id = d.id
+            LEFT JOIN study_sessions ss ON d.id = ss.deck_id AND ss.completed_at IS NOT NULL
             GROUP BY d.id, d.name, d.deck_type, d.created_at, d.updated_at
             ORDER BY d.updated_at DESC
             """.trimIndent(),
@@ -39,9 +43,11 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
         val results = jdbcTemplate.query(
             """
             SELECT d.id, d.name, d.deck_type, d.created_at, d.updated_at,
-                   COUNT(c.id) AS card_count
+                   COUNT(DISTINCT c.id) AS card_count,
+                   MAX(ss.completed_at) AS last_studied_at
             FROM decks d
             LEFT JOIN cards c ON c.deck_id = d.id
+            LEFT JOIN study_sessions ss ON d.id = ss.deck_id AND ss.completed_at IS NOT NULL
             WHERE d.id = ?
             GROUP BY d.id, d.name, d.deck_type, d.created_at, d.updated_at
             """.trimIndent(),

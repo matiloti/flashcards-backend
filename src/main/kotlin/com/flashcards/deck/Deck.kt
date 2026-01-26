@@ -8,6 +8,7 @@ data class Deck(
     val name: String,
     val type: DeckType = DeckType.STUDY,
     val cardCount: Int = 0,
+    val lastStudiedAt: Instant? = null,
     val createdAt: Instant,
     val updatedAt: Instant
 )
