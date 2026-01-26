@@ -14,6 +14,7 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
         Deck(
             id = UUID.fromString(rs.getString("id")),
             name = rs.getString("name"),
+            type = DeckType.valueOf(rs.getString("deck_type")),
             cardCount = rs.getInt("card_count"),
             createdAt = rs.getTimestamp("created_at").toInstant(),
             updatedAt = rs.getTimestamp("updated_at").toInstant()
@@ -23,11 +24,11 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
     fun findAll(): List<Deck> {
         return jdbcTemplate.query(
             """
-            SELECT d.id, d.name, d.created_at, d.updated_at,
+            SELECT d.id, d.name, d.deck_type, d.created_at, d.updated_at,
                    COUNT(c.id) AS card_count
             FROM decks d
             LEFT JOIN cards c ON c.deck_id = d.id
-            GROUP BY d.id, d.name, d.created_at, d.updated_at
+            GROUP BY d.id, d.name, d.deck_type, d.created_at, d.updated_at
             ORDER BY d.updated_at DESC
             """.trimIndent(),
             rowMapper
@@ -37,12 +38,12 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
     fun findById(id: UUID): Deck? {
         val results = jdbcTemplate.query(
             """
-            SELECT d.id, d.name, d.created_at, d.updated_at,
+            SELECT d.id, d.name, d.deck_type, d.created_at, d.updated_at,
                    COUNT(c.id) AS card_count
             FROM decks d
             LEFT JOIN cards c ON c.deck_id = d.id
             WHERE d.id = ?
-            GROUP BY d.id, d.name, d.created_at, d.updated_at
+            GROUP BY d.id, d.name, d.deck_type, d.created_at, d.updated_at
             """.trimIndent(),
             rowMapper,
             id
@@ -50,14 +51,14 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
         return results.firstOrNull()
     }
 
-    fun create(name: String): Deck {
+    fun create(name: String, type: DeckType = DeckType.STUDY): Deck {
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
-            "INSERT INTO decks (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            id, name, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
+            "INSERT INTO decks (id, name, deck_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            id, name, type.name, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
         )
-        return Deck(id = id, name = name, cardCount = 0, createdAt = now, updatedAt = now)
+        return Deck(id = id, name = name, type = type, cardCount = 0, createdAt = now, updatedAt = now)
     }
 
     fun update(id: UUID, name: String): Boolean {

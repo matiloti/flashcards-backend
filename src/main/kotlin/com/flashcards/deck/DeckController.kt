@@ -25,7 +25,8 @@ class DeckController(private val repository: DeckRepository) {
         if (name.isBlank() || name.length > 100) {
             return ResponseEntity.badRequest().build()
         }
-        val deck = repository.create(name)
+        val type = request.type ?: DeckType.STUDY
+        val deck = repository.create(name, type)
         return ResponseEntity.status(HttpStatus.CREATED).body(deck)
     }
 

@@ -160,4 +160,77 @@ class DeckControllerTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.length()").value(2))
     }
+
+    @Test
+    fun `create deck without type defaults to STUDY`() {
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Default Type Deck"}""")
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.name").value("Default Type Deck"))
+            .andExpect(jsonPath("$.type").value("STUDY"))
+    }
+
+    @Test
+    fun `create deck with explicit STUDY type`() {
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Study Deck", "type": "STUDY"}""")
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.name").value("Study Deck"))
+            .andExpect(jsonPath("$.type").value("STUDY"))
+    }
+
+    @Test
+    fun `create deck with FLASH_REVIEW type`() {
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Flash Review Deck", "type": "FLASH_REVIEW"}""")
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.name").value("Flash Review Deck"))
+            .andExpect(jsonPath("$.type").value("FLASH_REVIEW"))
+    }
+
+    @Test
+    fun `get deck includes type field`() {
+        val createResult = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Typed Deck", "type": "FLASH_REVIEW"}""")
+        )
+            .andExpect(status().isCreated)
+            .andReturn()
+
+        val id = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(createResult.response.contentAsString)["id"].asText()
+
+        mockMvc.perform(get("/api/v1/decks/$id"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.type").value("FLASH_REVIEW"))
+    }
+
+    @Test
+    fun `list decks includes type field`() {
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Study", "type": "STUDY"}""")
+        )
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Flash", "type": "FLASH_REVIEW"}""")
+        )
+
+        mockMvc.perform(get("/api/v1/decks"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[?(@.name == 'Study')].type").value("STUDY"))
+            .andExpect(jsonPath("$[?(@.name == 'Flash')].type").value("FLASH_REVIEW"))
+    }
 }
