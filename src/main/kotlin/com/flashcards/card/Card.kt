@@ -7,7 +7,7 @@ data class Card(
     val id: UUID,
     val deckId: UUID,
     val frontText: String,
-    val backText: String,
+    val backText: String?,
     val createdAt: Instant,
     val updatedAt: Instant
 )

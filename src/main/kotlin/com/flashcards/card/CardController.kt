@@ -1,6 +1,8 @@
 package com.flashcards.card
 
+import com.flashcards.deck.Deck
 import com.flashcards.deck.DeckRepository
+import com.flashcards.deck.DeckType
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -31,12 +33,12 @@ class CardController(
         @PathVariable deckId: UUID,
         @RequestBody request: CreateCardRequest
     ): ResponseEntity<Card> {
-        deckRepository.findById(deckId) ?: return ResponseEntity.notFound().build()
+        val deck = deckRepository.findById(deckId) ?: return ResponseEntity.notFound().build()
 
         val frontText = request.frontText.trim()
-        val backText = request.backText.trim()
+        val backText = request.backText?.trim()
 
-        if (frontText.isBlank() || frontText.length > 500 || backText.isBlank() || backText.length > 500) {
+        if (!validateCard(deck, frontText, backText)) {
             return ResponseEntity.badRequest().build()
         }
 
@@ -50,12 +52,12 @@ class CardController(
         @PathVariable cardId: UUID,
         @RequestBody request: UpdateCardRequest
     ): ResponseEntity<Card> {
-        deckRepository.findById(deckId) ?: return ResponseEntity.notFound().build()
+        val deck = deckRepository.findById(deckId) ?: return ResponseEntity.notFound().build()
 
         val frontText = request.frontText.trim()
-        val backText = request.backText.trim()
+        val backText = request.backText?.trim()
 
-        if (frontText.isBlank() || frontText.length > 500 || backText.isBlank() || backText.length > 500) {
+        if (!validateCard(deck, frontText, backText)) {
             return ResponseEntity.badRequest().build()
         }
 
@@ -75,5 +77,29 @@ class CardController(
             return ResponseEntity.notFound().build()
         }
         return ResponseEntity.noContent().build()
+    }
+
+    /**
+     * Validates card content based on deck type:
+     * - STUDY: frontText and backText are required (1-500 chars, not blank)
+     * - FLASH_REVIEW: frontText required (1-500 chars), backText optional (0-500 chars if provided)
+     */
+    private fun validateCard(deck: Deck, frontText: String, backText: String?): Boolean {
+        // frontText is always required
+        if (frontText.isBlank() || frontText.length > 500) {
+            return false
+        }
+
+        // backText validation depends on deck type
+        return when (deck.type) {
+            DeckType.STUDY -> {
+                // backText is required for study decks
+                !backText.isNullOrBlank() && backText.length <= 500
+            }
+            DeckType.FLASH_REVIEW -> {
+                // backText is optional for flash review decks, but if provided must not exceed length limit
+                backText == null || backText.length <= 500
+            }
+        }
     }
 }

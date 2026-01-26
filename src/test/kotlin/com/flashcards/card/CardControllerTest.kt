@@ -174,4 +174,129 @@ class CardControllerTest {
         mockMvc.perform(delete("/api/v1/decks/$deckId/cards/00000000-0000-0000-0000-000000000000"))
             .andExpect(status().isNotFound)
     }
+
+    // ==================== Deck Type Card Validation Tests ====================
+
+    @Test
+    fun `create card in STUDY deck without backText returns 400`() {
+        // Default deck is STUDY type
+        mockMvc.perform(
+            post("/api/v1/decks/$deckId/cards")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"frontText": "Question without answer"}""")
+        )
+            .andExpect(status().isBadRequest)
+    }
+
+    @Test
+    fun `create card in FLASH_REVIEW deck without backText returns 201`() {
+        // Create a Flash Review deck
+        val flashDeckResult = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Flash Review Deck", "type": "FLASH_REVIEW"}""")
+        ).andReturn()
+        val flashDeckId = objectMapper.readTree(flashDeckResult.response.contentAsString)["id"].asText()
+
+        mockMvc.perform(
+            post("/api/v1/decks/$flashDeckId/cards")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"frontText": "Two Pointers Pattern"}""")
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.frontText").value("Two Pointers Pattern"))
+            .andExpect(jsonPath("$.backText").isEmpty)
+    }
+
+    @Test
+    fun `create card in FLASH_REVIEW deck with backText (notes) returns 201`() {
+        // Create a Flash Review deck
+        val flashDeckResult = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Flash Review Deck", "type": "FLASH_REVIEW"}""")
+        ).andReturn()
+        val flashDeckId = objectMapper.readTree(flashDeckResult.response.contentAsString)["id"].asText()
+
+        mockMvc.perform(
+            post("/api/v1/decks/$flashDeckId/cards")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"frontText": "Sliding Window", "backText": "Array technique for contiguous subarrays"}""")
+        )
+            .andExpect(status().isCreated)
+            .andExpect(jsonPath("$.frontText").value("Sliding Window"))
+            .andExpect(jsonPath("$.backText").value("Array technique for contiguous subarrays"))
+    }
+
+    @Test
+    fun `update FLASH_REVIEW card to remove backText returns 200`() {
+        // Create a Flash Review deck
+        val flashDeckResult = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Flash Review Deck", "type": "FLASH_REVIEW"}""")
+        ).andReturn()
+        val flashDeckId = objectMapper.readTree(flashDeckResult.response.contentAsString)["id"].asText()
+
+        // Create card with notes
+        val cardResult = mockMvc.perform(
+            post("/api/v1/decks/$flashDeckId/cards")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"frontText": "BFS", "backText": "Level order traversal"}""")
+        ).andReturn()
+        val cardId = objectMapper.readTree(cardResult.response.contentAsString)["id"].asText()
+
+        // Update to remove notes
+        mockMvc.perform(
+            put("/api/v1/decks/$flashDeckId/cards/$cardId")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"frontText": "BFS"}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.frontText").value("BFS"))
+            .andExpect(jsonPath("$.backText").isEmpty)
+    }
+
+    @Test
+    fun `update STUDY card to remove backText returns 400`() {
+        // Create card in default STUDY deck
+        val cardResult = mockMvc.perform(
+            post("/api/v1/decks/$deckId/cards")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"frontText": "Question", "backText": "Answer"}""")
+        ).andReturn()
+        val cardId = objectMapper.readTree(cardResult.response.contentAsString)["id"].asText()
+
+        // Try to remove backText
+        mockMvc.perform(
+            put("/api/v1/decks/$deckId/cards/$cardId")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"frontText": "Question"}""")
+        )
+            .andExpect(status().isBadRequest)
+    }
+
+    @Test
+    fun `list cards in FLASH_REVIEW deck includes null backText`() {
+        // Create a Flash Review deck
+        val flashDeckResult = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Flash Review Deck", "type": "FLASH_REVIEW"}""")
+        ).andReturn()
+        val flashDeckId = objectMapper.readTree(flashDeckResult.response.contentAsString)["id"].asText()
+
+        // Create card without notes
+        mockMvc.perform(
+            post("/api/v1/decks/$flashDeckId/cards")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"frontText": "No Notes Concept"}""")
+        )
+
+        // List cards
+        mockMvc.perform(get("/api/v1/decks/$flashDeckId/cards"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].frontText").value("No Notes Concept"))
+            .andExpect(jsonPath("$[0].backText").isEmpty)
+    }
 }

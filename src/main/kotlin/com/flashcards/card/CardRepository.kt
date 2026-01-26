@@ -15,7 +15,7 @@ class CardRepository(private val jdbcTemplate: JdbcTemplate) {
             id = UUID.fromString(rs.getString("id")),
             deckId = UUID.fromString(rs.getString("deck_id")),
             frontText = rs.getString("front_text"),
-            backText = rs.getString("back_text"),
+            backText = rs.getString("back_text"), // Can be null for FLASH_REVIEW cards
             createdAt = rs.getTimestamp("created_at").toInstant(),
             updatedAt = rs.getTimestamp("updated_at").toInstant()
         )
@@ -38,7 +38,7 @@ class CardRepository(private val jdbcTemplate: JdbcTemplate) {
         return results.firstOrNull()
     }
 
-    fun create(deckId: UUID, frontText: String, backText: String): Card {
+    fun create(deckId: UUID, frontText: String, backText: String?): Card {
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
@@ -48,7 +48,7 @@ class CardRepository(private val jdbcTemplate: JdbcTemplate) {
         return Card(id = id, deckId = deckId, frontText = frontText, backText = backText, createdAt = now, updatedAt = now)
     }
 
-    fun update(deckId: UUID, cardId: UUID, frontText: String, backText: String): Boolean {
+    fun update(deckId: UUID, cardId: UUID, frontText: String, backText: String?): Boolean {
         val updated = jdbcTemplate.update(
             "UPDATE cards SET front_text = ?, back_text = ?, updated_at = NOW() WHERE id = ? AND deck_id = ?",
             frontText, backText, cardId, deckId

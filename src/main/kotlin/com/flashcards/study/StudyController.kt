@@ -25,7 +25,7 @@ class StudyController(
         }
 
         val session = studyRepository.createSession(deckId)
-        val studyCards = cards.shuffled().map { StudyCard(id = it.id, frontText = it.frontText, backText = it.backText) }
+        val studyCards = cards.shuffled().map { StudyCard(id = it.id, frontText = it.frontText, backText = it.backText ?: "") }
 
         val response = StartSessionResponse(
             sessionId = session.id,
