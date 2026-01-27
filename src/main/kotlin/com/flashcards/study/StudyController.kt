@@ -66,6 +66,10 @@ class StudyController(
             ?: return ResponseEntity.notFound().build()
 
         val completedAt = studyRepository.completeSession(sessionId)
+
+        // Update deck's lastStudiedAt timestamp
+        deckRepository.updateLastStudiedAt(session.deckId, completedAt)
+
         val counts = studyRepository.getReviewCounts(sessionId)
 
         val hardCount = counts[Rating.HARD] ?: 0

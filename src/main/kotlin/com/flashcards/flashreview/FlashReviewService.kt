@@ -92,6 +92,9 @@ class FlashReviewService(
 
         val completedAt = studyRepository.completeFlashReviewSession(sessionId, actualConceptsViewed)
 
+        // Update deck's lastStudiedAt timestamp
+        deckRepository.updateLastStudiedAt(session.deckId, completedAt)
+
         val durationSeconds = Duration.between(session.startedAt, completedAt).seconds
 
         return CompleteSessionResult.Success(
