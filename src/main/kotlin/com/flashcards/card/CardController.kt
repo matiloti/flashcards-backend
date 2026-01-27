@@ -3,8 +3,10 @@ package com.flashcards.card
 import com.flashcards.deck.Deck
 import com.flashcards.deck.DeckRepository
 import com.flashcards.deck.DeckType
+import com.flashcards.security.JwtAuthentication
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
@@ -15,15 +17,25 @@ class CardController(
     private val deckRepository: DeckRepository
 ) {
 
+    /**
+     * Get the current authenticated user's ID from the SecurityContext.
+     */
+    private fun getCurrentUserId(): UUID {
+        val authentication = SecurityContextHolder.getContext().authentication as JwtAuthentication
+        return authentication.userId
+    }
+
     @GetMapping
     fun listCards(@PathVariable deckId: UUID): ResponseEntity<List<Card>> {
-        deckRepository.findById(deckId) ?: return ResponseEntity.notFound().build()
+        val userId = getCurrentUserId()
+        deckRepository.findById(deckId, userId) ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(cardRepository.findByDeckId(deckId))
     }
 
     @GetMapping("/{cardId}")
     fun getCard(@PathVariable deckId: UUID, @PathVariable cardId: UUID): ResponseEntity<Card> {
-        deckRepository.findById(deckId) ?: return ResponseEntity.notFound().build()
+        val userId = getCurrentUserId()
+        deckRepository.findById(deckId, userId) ?: return ResponseEntity.notFound().build()
         val card = cardRepository.findById(deckId, cardId) ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(card)
     }
@@ -33,7 +45,8 @@ class CardController(
         @PathVariable deckId: UUID,
         @RequestBody request: CreateCardRequest
     ): ResponseEntity<Card> {
-        val deck = deckRepository.findById(deckId) ?: return ResponseEntity.notFound().build()
+        val userId = getCurrentUserId()
+        val deck = deckRepository.findById(deckId, userId) ?: return ResponseEntity.notFound().build()
 
         val frontText = request.frontText.trim()
         val backText = request.backText?.trim()
@@ -52,7 +65,8 @@ class CardController(
         @PathVariable cardId: UUID,
         @RequestBody request: UpdateCardRequest
     ): ResponseEntity<Card> {
-        val deck = deckRepository.findById(deckId) ?: return ResponseEntity.notFound().build()
+        val userId = getCurrentUserId()
+        val deck = deckRepository.findById(deckId, userId) ?: return ResponseEntity.notFound().build()
 
         val frontText = request.frontText.trim()
         val backText = request.backText?.trim()
@@ -71,7 +85,8 @@ class CardController(
 
     @DeleteMapping("/{cardId}")
     fun deleteCard(@PathVariable deckId: UUID, @PathVariable cardId: UUID): ResponseEntity<Void> {
-        deckRepository.findById(deckId) ?: return ResponseEntity.notFound().build()
+        val userId = getCurrentUserId()
+        deckRepository.findById(deckId, userId) ?: return ResponseEntity.notFound().build()
         val deleted = cardRepository.delete(deckId, cardId)
         if (!deleted) {
             return ResponseEntity.notFound().build()

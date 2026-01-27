@@ -40,10 +40,10 @@ class StatisticsRepositoryTest {
 
         // Ensure sentinel user_statistics row exists
         jdbcTemplate.update(
-            """INSERT INTO user_statistics (id, current_streak, longest_streak, total_cards_studied,
-               total_study_time_minutes, total_sessions) VALUES (?, 0, 0, 0, 0, 0)
-               ON CONFLICT (id) DO NOTHING""",
-            sentinelUserId
+            """INSERT INTO user_statistics (id, user_id, current_streak, longest_streak, total_cards_studied,
+               total_study_time_minutes, total_sessions) VALUES (?, ?, 0, 0, 0, 0, 0)
+               ON CONFLICT (user_id) DO NOTHING""",
+            sentinelUserId, sentinelUserId
         )
     }
 
@@ -53,7 +53,7 @@ class StatisticsRepositoryTest {
 
     @Test
     fun `getUserStats returns empty stats for new user`() {
-        val stats = statisticsRepository.getUserStats()
+        val stats = statisticsRepository.getUserStats(sentinelUserId)
 
         assertThat(stats).isNotNull
         assertThat(stats.currentStreak).isEqualTo(0)
@@ -70,11 +70,11 @@ class StatisticsRepositoryTest {
         jdbcTemplate.update(
             """UPDATE user_statistics SET current_streak = 5, longest_streak = 10,
                last_study_date = ?, total_cards_studied = 100, total_study_time_minutes = 60,
-               total_sessions = 15 WHERE id = ?""",
+               total_sessions = 15 WHERE user_id = ?""",
             java.sql.Date.valueOf(today), sentinelUserId
         )
 
-        val stats = statisticsRepository.getUserStats()
+        val stats = statisticsRepository.getUserStats(sentinelUserId)
 
         assertThat(stats.currentStreak).isEqualTo(5)
         assertThat(stats.longestStreak).isEqualTo(10)
@@ -94,7 +94,7 @@ class StatisticsRepositoryTest {
         val endDate = LocalDate.now()
         val startDate = endDate.minusDays(6)
 
-        val stats = statisticsRepository.getDailyStats(startDate, endDate, zoneId)
+        val stats = statisticsRepository.getDailyStats(sentinelUserId, startDate, endDate, zoneId)
 
         assertThat(stats).isEmpty()
     }
@@ -106,19 +106,19 @@ class StatisticsRepositoryTest {
 
         // Insert some daily stats
         jdbcTemplate.update(
-            """INSERT INTO daily_study_stats (study_date, cards_studied, time_minutes,
+            """INSERT INTO daily_study_stats (user_id, study_date, cards_studied, time_minutes,
                sessions_completed, easy_count, hard_count, again_count)
-               VALUES (?, 20, 15, 2, 10, 5, 5)""",
-            java.sql.Date.valueOf(today)
+               VALUES (?, ?, 20, 15, 2, 10, 5, 5)""",
+            sentinelUserId, java.sql.Date.valueOf(today)
         )
         jdbcTemplate.update(
-            """INSERT INTO daily_study_stats (study_date, cards_studied, time_minutes,
+            """INSERT INTO daily_study_stats (user_id, study_date, cards_studied, time_minutes,
                sessions_completed, easy_count, hard_count, again_count)
-               VALUES (?, 30, 25, 3, 15, 10, 5)""",
-            java.sql.Date.valueOf(yesterday)
+               VALUES (?, ?, 30, 25, 3, 15, 10, 5)""",
+            sentinelUserId, java.sql.Date.valueOf(yesterday)
         )
 
-        val stats = statisticsRepository.getDailyStats(yesterday, today, ZoneId.of("UTC"))
+        val stats = statisticsRepository.getDailyStats(sentinelUserId, yesterday, today, ZoneId.of("UTC"))
 
         assertThat(stats).hasSize(2)
         val todayStats = stats.find { it.studyDate == today }
@@ -134,7 +134,7 @@ class StatisticsRepositoryTest {
 
     @Test
     fun `getCardProgressCounts returns zeros when no cards`() {
-        val counts = statisticsRepository.getCardProgressCounts()
+        val counts = statisticsRepository.getCardProgressCounts(sentinelUserId)
 
         assertThat(counts.mastered).isEqualTo(0)
         assertThat(counts.learning).isEqualTo(0)
@@ -164,7 +164,7 @@ class StatisticsRepositoryTest {
         )
         // card3 and card4 have no card_progress entries (NEW cards)
 
-        val counts = statisticsRepository.getCardProgressCounts()
+        val counts = statisticsRepository.getCardProgressCounts(sentinelUserId)
 
         assertThat(counts.mastered).isEqualTo(1)
         assertThat(counts.learning).isEqualTo(1)
@@ -178,7 +178,7 @@ class StatisticsRepositoryTest {
 
     @Test
     fun `getAccuracyStats returns null rate when no reviews`() {
-        val stats = statisticsRepository.getAccuracyStats(7, ZoneId.of("UTC"))
+        val stats = statisticsRepository.getAccuracyStats(sentinelUserId, 7, ZoneId.of("UTC"))
 
         assertThat(stats.rate).isNull()
         assertThat(stats.trend).isNull()
@@ -198,7 +198,7 @@ class StatisticsRepositoryTest {
         repeat(3) { createTestReview(sessionId, cardId, "HARD") }
         repeat(1) { createTestReview(sessionId, cardId, "AGAIN") }
 
-        val stats = statisticsRepository.getAccuracyStats(7, ZoneId.of("UTC"))
+        val stats = statisticsRepository.getAccuracyStats(sentinelUserId, 7, ZoneId.of("UTC"))
 
         assertThat(stats.easyCount).isEqualTo(6)
         assertThat(stats.hardCount).isEqualTo(3)
@@ -212,7 +212,7 @@ class StatisticsRepositoryTest {
 
     @Test
     fun `getTopDecks returns empty list when no studied decks`() {
-        val topDecks = statisticsRepository.getTopDecks(5)
+        val topDecks = statisticsRepository.getTopDecks(sentinelUserId, 5)
 
         assertThat(topDecks).isEmpty()
     }
@@ -252,7 +252,7 @@ class StatisticsRepositoryTest {
             java.sql.Timestamp.from(newTime), deck2Id
         )
 
-        val topDecks = statisticsRepository.getTopDecks(5)
+        val topDecks = statisticsRepository.getTopDecks(sentinelUserId, 5)
 
         assertThat(topDecks).hasSize(2)
         assertThat(topDecks[0].name).isEqualTo("Deck 2") // Most recently studied first
@@ -291,7 +291,7 @@ class StatisticsRepositoryTest {
             java.sql.Timestamp.from(now), deckId
         )
 
-        val topDecks = statisticsRepository.getTopDecks(5)
+        val topDecks = statisticsRepository.getTopDecks(sentinelUserId, 5)
 
         assertThat(topDecks).hasSize(1)
         assertThat(topDecks[0].masteredCards).isEqualTo(2)
@@ -305,7 +305,7 @@ class StatisticsRepositoryTest {
 
     @Test
     fun `getDeckCount returns zero when no decks`() {
-        val count = statisticsRepository.getDeckCount()
+        val count = statisticsRepository.getDeckCount(sentinelUserId)
         assertThat(count).isEqualTo(0)
     }
 
@@ -315,7 +315,7 @@ class StatisticsRepositoryTest {
         createTestDeck("Deck 2")
         createTestDeck("Deck 3")
 
-        val count = statisticsRepository.getDeckCount()
+        val count = statisticsRepository.getDeckCount(sentinelUserId)
         assertThat(count).isEqualTo(3)
     }
 
@@ -326,13 +326,14 @@ class StatisticsRepositoryTest {
     @Test
     fun `updateUserStats updates cumulative statistics`() {
         statisticsRepository.updateUserStats(
+            userId = sentinelUserId,
             cardsStudied = 10,
             studyTimeMinutes = 5,
             sessionsCompleted = 1,
             studyDate = LocalDate.now()
         )
 
-        val stats = statisticsRepository.getUserStats()
+        val stats = statisticsRepository.getUserStats(sentinelUserId)
 
         assertThat(stats.totalCardsStudied).isEqualTo(10)
         assertThat(stats.totalStudyTimeMinutes).isEqualTo(5)
@@ -344,18 +345,19 @@ class StatisticsRepositoryTest {
         // Set initial stats
         jdbcTemplate.update(
             """UPDATE user_statistics SET total_cards_studied = 50,
-               total_study_time_minutes = 30, total_sessions = 5 WHERE id = ?""",
+               total_study_time_minutes = 30, total_sessions = 5 WHERE user_id = ?""",
             sentinelUserId
         )
 
         statisticsRepository.updateUserStats(
+            userId = sentinelUserId,
             cardsStudied = 10,
             studyTimeMinutes = 5,
             sessionsCompleted = 1,
             studyDate = LocalDate.now()
         )
 
-        val stats = statisticsRepository.getUserStats()
+        val stats = statisticsRepository.getUserStats(sentinelUserId)
 
         assertThat(stats.totalCardsStudied).isEqualTo(60)
         assertThat(stats.totalStudyTimeMinutes).isEqualTo(35)
@@ -371,6 +373,7 @@ class StatisticsRepositoryTest {
         val today = LocalDate.now()
 
         statisticsRepository.upsertDailyStats(
+            userId = sentinelUserId,
             studyDate = today,
             cardsStudied = 20,
             timeMinutes = 15,
@@ -379,7 +382,7 @@ class StatisticsRepositoryTest {
             againCount = 5
         )
 
-        val stats = statisticsRepository.getDailyStats(today, today, ZoneId.of("UTC"))
+        val stats = statisticsRepository.getDailyStats(sentinelUserId, today, today, ZoneId.of("UTC"))
 
         assertThat(stats).hasSize(1)
         assertThat(stats[0].cardsStudied).isEqualTo(20)
@@ -392,12 +395,12 @@ class StatisticsRepositoryTest {
         val today = LocalDate.now()
 
         // First session
-        statisticsRepository.upsertDailyStats(today, 20, 15, 10, 5, 5)
+        statisticsRepository.upsertDailyStats(sentinelUserId, today, 20, 15, 10, 5, 5)
 
         // Second session same day
-        statisticsRepository.upsertDailyStats(today, 30, 20, 15, 10, 5)
+        statisticsRepository.upsertDailyStats(sentinelUserId, today, 30, 20, 15, 10, 5)
 
-        val stats = statisticsRepository.getDailyStats(today, today, ZoneId.of("UTC"))
+        val stats = statisticsRepository.getDailyStats(sentinelUserId, today, today, ZoneId.of("UTC"))
 
         assertThat(stats).hasSize(1)
         assertThat(stats[0].cardsStudied).isEqualTo(50) // 20 + 30
@@ -413,8 +416,8 @@ class StatisticsRepositoryTest {
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
-            "INSERT INTO decks (id, name, deck_type, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?)",
-            id, name, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
+            "INSERT INTO decks (id, name, deck_type, user_id, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?, ?)",
+            id, name, sentinelUserId, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
         )
         return id
     }

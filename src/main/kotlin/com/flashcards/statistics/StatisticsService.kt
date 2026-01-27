@@ -3,6 +3,7 @@ package com.flashcards.statistics
 import org.springframework.stereotype.Service
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 
 /**
  * Service for calculating and aggregating statistics data.
@@ -21,15 +22,15 @@ class StatisticsService(
      * Get complete statistics overview for the user.
      * This is the main entry point for the statistics API.
      */
-    fun getOverview(zoneId: ZoneId): StatisticsOverviewResponse {
+    fun getOverview(userId: UUID, zoneId: ZoneId): StatisticsOverviewResponse {
         val today = LocalDate.now(zoneId)
         val weekStart = today.minusDays(6)
 
         // Get user stats (streak, all-time totals)
-        val userStats = statisticsRepository.getUserStats()
+        val userStats = statisticsRepository.getUserStats(userId)
 
         // Get daily stats for the week
-        val dailyStats = statisticsRepository.getDailyStats(weekStart, today, zoneId)
+        val dailyStats = statisticsRepository.getDailyStats(userId, weekStart, today, zoneId)
         val dailyStatsMap = dailyStats.associateBy { it.studyDate }
 
         // Build week days
@@ -59,7 +60,7 @@ class StatisticsService(
         )
 
         // All-time stats
-        val deckCount = statisticsRepository.getDeckCount()
+        val deckCount = statisticsRepository.getDeckCount(userId)
         val allTimeResponse = AllTimeStats(
             totalCardsStudied = userStats.totalCardsStudied,
             totalTimeMinutes = userStats.totalStudyTimeMinutes,
@@ -68,16 +69,16 @@ class StatisticsService(
         )
 
         // Card progress
-        val cardProgress = statisticsRepository.getCardProgressCounts()
+        val cardProgress = statisticsRepository.getCardProgressCounts(userId)
 
         // Accuracy with trend
-        val accuracy = calculateAccuracyWithTrend(ACCURACY_PERIOD_DAYS, zoneId)
+        val accuracy = calculateAccuracyWithTrend(userId, ACCURACY_PERIOD_DAYS, zoneId)
 
         // Top decks
-        val topDecks = statisticsRepository.getTopDecks(5)
+        val topDecks = statisticsRepository.getTopDecks(userId, 5)
 
         // Streak (calculate fresh, considering timezone)
-        val streak = calculateStreak(zoneId)
+        val streak = calculateStreak(userId, zoneId)
 
         return StatisticsOverviewResponse(
             streak = streak,
@@ -95,9 +96,9 @@ class StatisticsService(
      * A streak is consecutive days with at least one study session.
      * If user hasn't studied today, current streak is 0.
      */
-    fun calculateStreak(zoneId: ZoneId): StreakStats {
+    fun calculateStreak(userId: UUID, zoneId: ZoneId): StreakStats {
         val today = LocalDate.now(zoneId)
-        val studyDates = statisticsRepository.getStudyDates() // Ordered DESC
+        val studyDates = statisticsRepository.getStudyDates(userId) // Ordered DESC
 
         if (studyDates.isEmpty()) {
             return StreakStats(current = 0, longest = 0, lastStudyDate = null)
@@ -126,7 +127,7 @@ class StatisticsService(
         val longestStreak = calculateLongestStreak(studyDates)
 
         // Get stored longest streak (may be higher than calculated if older data purged)
-        val userStats = statisticsRepository.getUserStats()
+        val userStats = statisticsRepository.getUserStats(userId)
         val effectiveLongestStreak = maxOf(longestStreak, userStats.longestStreak, currentStreak)
 
         return StreakStats(
@@ -163,7 +164,7 @@ class StatisticsService(
     /**
      * Calculate accuracy for the specified period and determine trend.
      */
-    fun calculateAccuracyWithTrend(periodDays: Int, zoneId: ZoneId): AccuracyStats {
+    fun calculateAccuracyWithTrend(userId: UUID, periodDays: Int, zoneId: ZoneId): AccuracyStats {
         val today = LocalDate.now(zoneId)
 
         // Current period: last N days
@@ -174,8 +175,8 @@ class StatisticsService(
         val previousEndDate = currentStartDate.minusDays(1)
         val previousStartDate = previousEndDate.minusDays(periodDays.toLong() - 1)
 
-        val currentStats = statisticsRepository.getAccuracyStatsForRange(currentStartDate, currentEndDate)
-        val previousStats = statisticsRepository.getAccuracyStatsForRange(previousStartDate, previousEndDate)
+        val currentStats = statisticsRepository.getAccuracyStatsForRange(userId, currentStartDate, currentEndDate)
+        val previousStats = statisticsRepository.getAccuracyStatsForRange(userId, previousStartDate, previousEndDate)
 
         val trend = calculateTrend(currentStats.rate, previousStats.rate)
 
@@ -211,6 +212,7 @@ class StatisticsService(
      * This should be called from StudyController.completeSession.
      */
     fun recordSessionCompletion(
+        userId: UUID,
         cardsStudied: Int,
         easyCount: Int,
         hardCount: Int,
@@ -220,8 +222,12 @@ class StatisticsService(
     ) {
         val today = LocalDate.now(zoneId)
 
+        // Ensure user_statistics row exists
+        statisticsRepository.ensureUserStatsExists(userId)
+
         // Update daily stats
         statisticsRepository.upsertDailyStats(
+            userId = userId,
             studyDate = today,
             cardsStudied = cardsStudied,
             timeMinutes = sessionDurationMinutes,
@@ -232,6 +238,7 @@ class StatisticsService(
 
         // Update user stats
         statisticsRepository.updateUserStats(
+            userId = userId,
             cardsStudied = cardsStudied,
             studyTimeMinutes = sessionDurationMinutes,
             sessionsCompleted = 1,
@@ -239,8 +246,8 @@ class StatisticsService(
         )
 
         // Recalculate and update streak
-        val streak = calculateStreak(zoneId)
-        statisticsRepository.updateStreak(streak.current, streak.longest)
+        val streak = calculateStreak(userId, zoneId)
+        statisticsRepository.updateStreak(userId, streak.current, streak.longest)
     }
 
     /**
@@ -248,7 +255,7 @@ class StatisticsService(
      * This should be called from StudyController.submitReview.
      */
     fun recordCardReview(
-        cardId: java.util.UUID,
+        cardId: UUID,
         rating: String,
         reviewedAt: java.time.Instant
     ) {

@@ -2,9 +2,11 @@ package com.flashcards.study
 
 import com.flashcards.card.CardRepository
 import com.flashcards.deck.DeckRepository
+import com.flashcards.security.JwtAuthentication
 import com.flashcards.statistics.StatisticsService
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.bind.annotation.*
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
@@ -18,9 +20,18 @@ class StudyController(
     private val statisticsService: StatisticsService
 ) {
 
+    /**
+     * Get the current authenticated user's ID from the SecurityContext.
+     */
+    private fun getCurrentUserId(): UUID {
+        val authentication = SecurityContextHolder.getContext().authentication as JwtAuthentication
+        return authentication.userId
+    }
+
     @PostMapping("/api/v1/decks/{deckId}/study")
     fun startSession(@PathVariable deckId: UUID): ResponseEntity<StartSessionResponse> {
-        val deck = deckRepository.findById(deckId)
+        val userId = getCurrentUserId()
+        val deck = deckRepository.findById(deckId, userId)
             ?: return ResponseEntity.notFound().build()
 
         val cards = cardRepository.findByDeckId(deckId)
@@ -71,10 +82,12 @@ class StudyController(
 
     @PostMapping("/api/v1/study/{sessionId}/complete")
     fun completeSession(@PathVariable sessionId: UUID): ResponseEntity<SessionSummary> {
+        val userId = getCurrentUserId()
         val session = studyRepository.findSessionById(sessionId)
             ?: return ResponseEntity.notFound().build()
 
-        val deck = deckRepository.findById(session.deckId)
+        // Verify the session's deck belongs to the current user
+        val deck = deckRepository.findById(session.deckId, userId)
             ?: return ResponseEntity.notFound().build()
 
         val completedAt = studyRepository.completeSession(sessionId)
@@ -95,6 +108,7 @@ class StudyController(
 
         // Update statistics (using UTC for now; timezone handling could be added)
         statisticsService.recordSessionCompletion(
+            userId = userId,
             cardsStudied = totalCards,
             easyCount = easyCount,
             hardCount = hardCount,
@@ -122,6 +136,8 @@ class StudyController(
 
     @PostMapping("/api/v1/study/{sessionId}/retake-missed")
     fun retakeMissed(@PathVariable sessionId: UUID): ResponseEntity<Any> {
+        val userId = getCurrentUserId()
+
         // Validate session exists
         val session = studyRepository.findSessionById(sessionId)
             ?: return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -133,8 +149,8 @@ class StudyController(
                 .body(ErrorResponse("Cannot retake: session is not completed"))
         }
 
-        // Validate deck still exists
-        val deck = deckRepository.findById(session.deckId)
+        // Validate deck still exists and belongs to user
+        val deck = deckRepository.findById(session.deckId, userId)
             ?: return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(ErrorResponse("Cannot retake: deck no longer exists"))
 

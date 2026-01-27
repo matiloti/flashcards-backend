@@ -45,10 +45,10 @@ class StatisticsControllerTest {
 
         // Ensure sentinel user_statistics row exists
         jdbcTemplate.update(
-            """INSERT INTO user_statistics (id, current_streak, longest_streak, total_cards_studied,
-               total_study_time_minutes, total_sessions) VALUES (?, 0, 0, 0, 0, 0)
-               ON CONFLICT (id) DO NOTHING""",
-            sentinelUserId
+            """INSERT INTO user_statistics (id, user_id, current_streak, longest_streak, total_cards_studied,
+               total_study_time_minutes, total_sessions) VALUES (?, ?, 0, 0, 0, 0, 0)
+               ON CONFLICT (user_id) DO NOTHING""",
+            sentinelUserId, sentinelUserId
         )
     }
 
@@ -118,7 +118,7 @@ class StatisticsControllerTest {
         jdbcTemplate.update(
             """UPDATE user_statistics SET current_streak = 3, longest_streak = 10,
                last_study_date = ?, total_cards_studied = 500,
-               total_study_time_minutes = 300, total_sessions = 50 WHERE id = ?""",
+               total_study_time_minutes = 300, total_sessions = 50 WHERE user_id = ?""",
             java.sql.Date.valueOf(today), sentinelUserId
         )
 
@@ -135,10 +135,10 @@ class StatisticsControllerTest {
 
         // Set up daily stats
         jdbcTemplate.update(
-            """INSERT INTO daily_study_stats (study_date, cards_studied, time_minutes,
+            """INSERT INTO daily_study_stats (user_id, study_date, cards_studied, time_minutes,
                sessions_completed, easy_count, hard_count, again_count)
-               VALUES (?, 20, 15, 2, 10, 5, 5)""",
-            java.sql.Date.valueOf(today)
+               VALUES (?, ?, 20, 15, 2, 10, 5, 5)""",
+            sentinelUserId, java.sql.Date.valueOf(today)
         )
 
         mockMvc.perform(get("/api/v1/statistics/overview"))
@@ -218,8 +218,8 @@ class StatisticsControllerTest {
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
-            "INSERT INTO decks (id, name, deck_type, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?)",
-            id, name, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
+            "INSERT INTO decks (id, name, deck_type, user_id, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?, ?)",
+            id, name, sentinelUserId, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
         )
         return id
     }

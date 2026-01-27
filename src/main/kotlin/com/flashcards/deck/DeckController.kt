@@ -1,9 +1,11 @@
 package com.flashcards.deck
 
 import com.flashcards.common.Page
+import com.flashcards.security.JwtAuthentication
 import com.flashcards.tag.*
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
@@ -13,6 +15,14 @@ class DeckController(
     private val repository: DeckRepository,
     private val deckService: DeckService
 ) {
+
+    /**
+     * Get the current authenticated user's ID from the SecurityContext.
+     */
+    private fun getCurrentUserId(): UUID {
+        val authentication = SecurityContextHolder.getContext().authentication as JwtAuthentication
+        return authentication.userId
+    }
 
     @GetMapping
     fun listDecks(
@@ -29,7 +39,8 @@ class DeckController(
             )
         }
 
-        val decks = deckService.getAllDecks(tagId, untagged)
+        val userId = getCurrentUserId()
+        val decks = deckService.getAllDecks(userId, tagId, untagged)
         return ResponseEntity.ok(decks)
     }
 
@@ -84,7 +95,8 @@ class DeckController(
             )
         }
 
-        val results = repository.search(trimmedQuery, page, size)
+        val userId = getCurrentUserId()
+        val results = repository.search(userId, trimmedQuery, page, size)
         return ResponseEntity.ok(results)
     }
 
@@ -108,12 +120,14 @@ class DeckController(
                 )
             )
         }
-        return ResponseEntity.ok(repository.findRecentlyStudied(limit))
+        val userId = getCurrentUserId()
+        return ResponseEntity.ok(repository.findRecentlyStudied(userId, limit))
     }
 
     @GetMapping("/{deckId}")
     fun getDeck(@PathVariable deckId: UUID): ResponseEntity<Any> {
-        val deck = deckService.getDeckById(deckId) ?: return ResponseEntity.notFound().build()
+        val userId = getCurrentUserId()
+        val deck = deckService.getDeckById(userId, deckId) ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(deck)
     }
 
@@ -124,8 +138,9 @@ class DeckController(
             return ResponseEntity.badRequest().build()
         }
 
+        val userId = getCurrentUserId()
         return try {
-            val deck = deckService.createDeck(request)
+            val deck = deckService.createDeck(userId, request)
             ResponseEntity.status(HttpStatus.CREATED).body(deck)
         } catch (e: TooManyTagsException) {
             ResponseEntity.badRequest().body(
@@ -157,17 +172,19 @@ class DeckController(
         if (name.isBlank() || name.length > 100) {
             return ResponseEntity.badRequest().build()
         }
-        val updated = repository.update(deckId, name)
+        val userId = getCurrentUserId()
+        val updated = repository.update(deckId, name, userId)
         if (!updated) {
             return ResponseEntity.notFound().build()
         }
-        val deck = deckService.getDeckById(deckId) ?: return ResponseEntity.notFound().build()
+        val deck = deckService.getDeckById(userId, deckId) ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(deck)
     }
 
     @DeleteMapping("/{deckId}")
     fun deleteDeck(@PathVariable deckId: UUID): ResponseEntity<Void> {
-        val deleted = repository.delete(deckId)
+        val userId = getCurrentUserId()
+        val deleted = repository.delete(deckId, userId)
         if (!deleted) {
             return ResponseEntity.notFound().build()
         }
@@ -183,8 +200,9 @@ class DeckController(
         @PathVariable deckId: UUID,
         @RequestBody request: UpdateDeckTagsRequest
     ): ResponseEntity<Any> {
+        val userId = getCurrentUserId()
         return try {
-            val deck = deckService.updateDeckTags(deckId, request.tagIds)
+            val deck = deckService.updateDeckTags(userId, deckId, request.tagIds)
             ResponseEntity.ok(deck)
         } catch (e: DeckNotFoundException) {
             ResponseEntity.notFound().build()

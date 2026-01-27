@@ -25,56 +25,58 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
         )
     }
 
-    fun findAll(): List<Deck> {
+    fun findAll(userId: UUID): List<Deck> {
         return jdbcTemplate.query(
             """
             SELECT d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at,
                    COUNT(DISTINCT c.id) AS card_count
             FROM decks d
             LEFT JOIN cards c ON c.deck_id = d.id
+            WHERE d.user_id = ?
             GROUP BY d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at
             ORDER BY d.updated_at DESC
             """.trimIndent(),
-            rowMapper
+            rowMapper,
+            userId
         )
     }
 
-    fun findById(id: UUID): Deck? {
+    fun findById(id: UUID, userId: UUID): Deck? {
         val results = jdbcTemplate.query(
             """
             SELECT d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at,
                    COUNT(DISTINCT c.id) AS card_count
             FROM decks d
             LEFT JOIN cards c ON c.deck_id = d.id
-            WHERE d.id = ?
+            WHERE d.id = ? AND d.user_id = ?
             GROUP BY d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at
             """.trimIndent(),
             rowMapper,
-            id
+            id, userId
         )
         return results.firstOrNull()
     }
 
-    fun create(name: String, type: DeckType = DeckType.STUDY): Deck {
+    fun create(name: String, type: DeckType = DeckType.STUDY, userId: UUID): Deck {
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
-            "INSERT INTO decks (id, name, deck_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            id, name, type.name, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
+            "INSERT INTO decks (id, name, deck_type, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            id, name, type.name, userId, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
         )
         return Deck(id = id, name = name, type = type, cardCount = 0, createdAt = now, updatedAt = now)
     }
 
-    fun update(id: UUID, name: String): Boolean {
+    fun update(id: UUID, name: String, userId: UUID): Boolean {
         val updated = jdbcTemplate.update(
-            "UPDATE decks SET name = ?, updated_at = NOW() WHERE id = ?",
-            name, id
+            "UPDATE decks SET name = ?, updated_at = NOW() WHERE id = ? AND user_id = ?",
+            name, id, userId
         )
         return updated > 0
     }
 
-    fun delete(id: UUID): Boolean {
-        val deleted = jdbcTemplate.update("DELETE FROM decks WHERE id = ?", id)
+    fun delete(id: UUID, userId: UUID): Boolean {
+        val deleted = jdbcTemplate.update("DELETE FROM decks WHERE id = ? AND user_id = ?", id, userId)
         return deleted > 0
     }
 
@@ -82,17 +84,18 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
      * Find recently studied decks ordered by lastStudiedAt DESC.
      * Only returns decks that have been studied (lastStudiedAt IS NOT NULL).
      *
+     * @param userId User ID to filter by
      * @param limit Maximum number of decks to return (1-10)
      * @return List of RecentDeck DTOs without createdAt/updatedAt fields
      */
-    fun findRecentlyStudied(limit: Int): List<RecentDeck> {
+    fun findRecentlyStudied(userId: UUID, limit: Int): List<RecentDeck> {
         return jdbcTemplate.query(
             """
             SELECT d.id, d.name, d.deck_type, d.last_studied_at,
                    COUNT(DISTINCT c.id) AS card_count
             FROM decks d
             LEFT JOIN cards c ON c.deck_id = d.id
-            WHERE d.last_studied_at IS NOT NULL
+            WHERE d.user_id = ? AND d.last_studied_at IS NOT NULL
             GROUP BY d.id, d.name, d.deck_type, d.last_studied_at
             ORDER BY d.last_studied_at DESC
             LIMIT ?
@@ -106,13 +109,15 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
                     lastStudiedAt = rs.getTimestamp("last_studied_at").toInstant()
                 )
             },
-            limit
+            userId, limit
         )
     }
 
     /**
      * Update the lastStudiedAt timestamp for a deck.
      * Called when a study or flash review session is completed.
+     * Note: This method does not filter by user_id since it's called internally
+     * after the deck ownership has already been verified.
      *
      * @param id Deck ID
      * @param lastStudiedAt Timestamp of session completion
@@ -132,12 +137,13 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
      * Results are ranked with name matches appearing before description-only matches,
      * and alphabetically sorted by name within each group.
      *
+     * @param userId User ID to filter by
      * @param query Search query (min 2 chars, already validated by controller)
      * @param page Page number (0-indexed)
      * @param size Page size (1-50)
      * @return Paginated search results with matchedField indicator
      */
-    fun search(query: String, page: Int, size: Int): Page<DeckSearchResponse> {
+    fun search(userId: UUID, query: String, page: Int, size: Int): Page<DeckSearchResponse> {
         val offset = page * size
 
         val searchSql = """
@@ -156,9 +162,10 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
                 END AS matched_field
             FROM decks d
             LEFT JOIN cards c ON d.id = c.deck_id
-            WHERE
+            WHERE d.user_id = ? AND (
                 d.name ILIKE '%' || ? || '%'
                 OR d.description ILIKE '%' || ? || '%'
+            )
             GROUP BY d.id
             ORDER BY
                 CASE WHEN d.name ILIKE '%' || ? || '%' THEN 0 ELSE 1 END,
@@ -169,18 +176,19 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
         val countSql = """
             SELECT COUNT(*)
             FROM decks d
-            WHERE
+            WHERE d.user_id = ? AND (
                 d.name ILIKE '%' || ? || '%'
                 OR d.description ILIKE '%' || ? || '%'
+            )
         """.trimIndent()
 
         val results = jdbcTemplate.query(
             searchSql,
             { rs, _ -> mapToDeckSearchResponse(rs) },
-            query, query, query, query, size, offset
+            query, userId, query, query, query, size, offset
         )
 
-        val totalElements = jdbcTemplate.queryForObject(countSql, Long::class.java, query, query)
+        val totalElements = jdbcTemplate.queryForObject(countSql, Long::class.java, userId, query, query)
         val totalPages = if (totalElements == 0L) 0 else ceil(totalElements.toDouble() / size).toInt()
 
         return Page(
@@ -211,7 +219,7 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
     /**
      * Find decks filtered by tag ID.
      */
-    fun findAllByTagId(tagId: UUID): List<Deck> {
+    fun findAllByTagId(userId: UUID, tagId: UUID): List<Deck> {
         return jdbcTemplate.query(
             """
             SELECT d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at,
@@ -219,18 +227,19 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
             FROM decks d
             INNER JOIN deck_tags dt ON d.id = dt.deck_id AND dt.tag_id = ?
             LEFT JOIN cards c ON c.deck_id = d.id
+            WHERE d.user_id = ?
             GROUP BY d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at
             ORDER BY d.updated_at DESC
             """.trimIndent(),
             rowMapper,
-            tagId
+            tagId, userId
         )
     }
 
     /**
      * Find decks that have no tags (untagged).
      */
-    fun findAllUntagged(): List<Deck> {
+    fun findAllUntagged(userId: UUID): List<Deck> {
         return jdbcTemplate.query(
             """
             SELECT d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at,
@@ -238,22 +247,23 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
             FROM decks d
             LEFT JOIN deck_tags dt ON d.id = dt.deck_id
             LEFT JOIN cards c ON c.deck_id = d.id
-            WHERE dt.deck_id IS NULL
+            WHERE d.user_id = ? AND dt.deck_id IS NULL
             GROUP BY d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at
             ORDER BY d.updated_at DESC
             """.trimIndent(),
-            rowMapper
+            rowMapper,
+            userId
         )
     }
 
     /**
-     * Check if a deck exists by ID.
+     * Check if a deck exists by ID and belongs to user.
      */
-    fun existsById(id: UUID): Boolean {
+    fun existsById(id: UUID, userId: UUID): Boolean {
         val count = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM decks WHERE id = ?",
+            "SELECT COUNT(*) FROM decks WHERE id = ? AND user_id = ?",
             Int::class.java,
-            id
+            id, userId
         )
         return count != null && count > 0
     }

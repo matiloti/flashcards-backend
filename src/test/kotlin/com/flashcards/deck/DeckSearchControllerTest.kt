@@ -28,6 +28,8 @@ class DeckSearchControllerTest {
 
     private val objectMapper = ObjectMapper()
 
+    private val sentinelUserId = java.util.UUID.fromString("00000000-0000-0000-0000-000000000001")
+
     @BeforeEach
     fun setup() {
         jdbcTemplate.execute("DELETE FROM card_reviews")
@@ -366,10 +368,10 @@ class DeckSearchControllerTest {
         val id = java.util.UUID.randomUUID().toString()
         jdbcTemplate.update(
             """
-            INSERT INTO decks (id, name, description, deck_type, created_at, updated_at)
-            VALUES (?::uuid, ?, ?, ?, NOW(), NOW())
+            INSERT INTO decks (id, name, description, deck_type, user_id, created_at, updated_at)
+            VALUES (?::uuid, ?, ?, ?, ?, NOW(), NOW())
             """.trimIndent(),
-            id, name, description, type
+            id, name, description, type, sentinelUserId
         )
         return id
     }

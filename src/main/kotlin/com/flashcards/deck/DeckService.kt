@@ -11,18 +11,14 @@ class DeckService(
     private val deckTagRepository: DeckTagRepository
 ) {
 
-    companion object {
-        private val SENTINEL_USER_ID = UUID.fromString("00000000-0000-0000-0000-000000000001")
-    }
-
     /**
-     * Get all decks with their tags.
+     * Get all decks with their tags for a user.
      */
-    fun getAllDecks(tagId: UUID? = null, untagged: Boolean? = null): List<DeckResponse> {
+    fun getAllDecks(userId: UUID, tagId: UUID? = null, untagged: Boolean? = null): List<DeckResponse> {
         val decks = when {
-            tagId != null -> deckRepository.findAllByTagId(tagId)
-            untagged == true -> deckRepository.findAllUntagged()
-            else -> deckRepository.findAll()
+            tagId != null -> deckRepository.findAllByTagId(userId, tagId)
+            untagged == true -> deckRepository.findAllUntagged(userId)
+            else -> deckRepository.findAll(userId)
         }
 
         // Batch load tags to avoid N+1
@@ -37,8 +33,8 @@ class DeckService(
     /**
      * Get a single deck by ID with tags.
      */
-    fun getDeckById(id: UUID): DeckResponse? {
-        val deck = deckRepository.findById(id) ?: return null
+    fun getDeckById(userId: UUID, id: UUID): DeckResponse? {
+        val deck = deckRepository.findById(id, userId) ?: return null
         val tags = deckTagRepository.findTagsByDeckId(id)
         return deck.toResponse(tags)
     }
@@ -46,17 +42,17 @@ class DeckService(
     /**
      * Create a new deck with optional tags.
      */
-    fun createDeck(request: CreateDeckRequest): DeckResponse {
+    fun createDeck(userId: UUID, request: CreateDeckRequest): DeckResponse {
         val name = request.name.trim()
         val type = request.type ?: DeckType.STUDY
         val tagIds = request.tagIds ?: emptyList()
 
         // Validate tags if provided
         if (tagIds.isNotEmpty()) {
-            tagService.validateTagIds(SENTINEL_USER_ID, tagIds)
+            tagService.validateTagIds(userId, tagIds)
         }
 
-        val deck = deckRepository.create(name, type)
+        val deck = deckRepository.create(name, type, userId)
 
         // Assign tags
         if (tagIds.isNotEmpty()) {
@@ -73,13 +69,13 @@ class DeckService(
      * @throws TooManyTagsException if more than 5 tags
      * @throws InvalidTagIdsException if any tag IDs are invalid
      */
-    fun updateDeckTags(deckId: UUID, tagIds: List<UUID>): DeckResponse {
-        val deck = deckRepository.findById(deckId)
+    fun updateDeckTags(userId: UUID, deckId: UUID, tagIds: List<UUID>): DeckResponse {
+        val deck = deckRepository.findById(deckId, userId)
             ?: throw DeckNotFoundException(deckId)
 
         // Validate tags
         if (tagIds.isNotEmpty()) {
-            tagService.validateTagIds(SENTINEL_USER_ID, tagIds)
+            tagService.validateTagIds(userId, tagIds)
         }
 
         deckTagRepository.setTagsForDeck(deckId, tagIds)

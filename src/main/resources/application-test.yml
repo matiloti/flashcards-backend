@@ -6,3 +6,11 @@ spring:
     password: test
   flyway:
     enabled: true
+
+app:
+  security:
+    jwt:
+      secret: test-secret-key-that-is-at-least-32-bytes-long-for-hs256-testing
+      access-token-expiry-seconds: 900
+      refresh-token-expiry-seconds: 2592000
+      issuer: flashcards-api-test

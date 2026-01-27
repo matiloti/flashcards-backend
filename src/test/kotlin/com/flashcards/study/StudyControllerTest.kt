@@ -46,10 +46,10 @@ class StudyControllerTest {
 
         // Ensure sentinel user_statistics row exists
         jdbcTemplate.update(
-            """INSERT INTO user_statistics (id, current_streak, longest_streak, total_cards_studied,
-               total_study_time_minutes, total_sessions) VALUES (?, 0, 0, 0, 0, 0)
-               ON CONFLICT (id) DO NOTHING""",
-            sentinelUserId
+            """INSERT INTO user_statistics (id, user_id, current_streak, longest_streak, total_cards_studied,
+               total_study_time_minutes, total_sessions) VALUES (?, ?, 0, 0, 0, 0, 0)
+               ON CONFLICT (user_id) DO NOTHING""",
+            sentinelUserId, sentinelUserId
         )
 
         // Create a deck

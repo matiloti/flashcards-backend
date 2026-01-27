@@ -41,10 +41,10 @@ class StatisticsServiceTest {
 
         // Ensure sentinel user_statistics row exists
         jdbcTemplate.update(
-            """INSERT INTO user_statistics (id, current_streak, longest_streak, total_cards_studied,
-               total_study_time_minutes, total_sessions) VALUES (?, 0, 0, 0, 0, 0)
-               ON CONFLICT (id) DO NOTHING""",
-            sentinelUserId
+            """INSERT INTO user_statistics (id, user_id, current_streak, longest_streak, total_cards_studied,
+               total_study_time_minutes, total_sessions) VALUES (?, ?, 0, 0, 0, 0, 0)
+               ON CONFLICT (user_id) DO NOTHING""",
+            sentinelUserId, sentinelUserId
         )
     }
 
@@ -54,7 +54,7 @@ class StatisticsServiceTest {
 
     @Test
     fun `getOverview returns empty state response for new user`() {
-        val response = statisticsService.getOverview(utcZone)
+        val response = statisticsService.getOverview(sentinelUserId, utcZone)
 
         assertThat(response.streak.current).isEqualTo(0)
         assertThat(response.streak.longest).isEqualTo(0)
@@ -91,13 +91,13 @@ class StatisticsServiceTest {
 
         // Add daily stats for today
         jdbcTemplate.update(
-            """INSERT INTO daily_study_stats (study_date, cards_studied, time_minutes,
+            """INSERT INTO daily_study_stats (user_id, study_date, cards_studied, time_minutes,
                sessions_completed, easy_count, hard_count, again_count)
-               VALUES (?, 20, 15, 2, 10, 5, 5)""",
-            java.sql.Date.valueOf(today)
+               VALUES (?, ?, 20, 15, 2, 10, 5, 5)""",
+            sentinelUserId, java.sql.Date.valueOf(today)
         )
 
-        val response = statisticsService.getOverview(utcZone)
+        val response = statisticsService.getOverview(sentinelUserId, utcZone)
 
         assertThat(response.today.cardsStudied).isEqualTo(20)
         assertThat(response.today.timeMinutes).isEqualTo(15)
@@ -112,25 +112,25 @@ class StatisticsServiceTest {
 
         // Add some study days
         jdbcTemplate.update(
-            """INSERT INTO daily_study_stats (study_date, cards_studied, time_minutes,
+            """INSERT INTO daily_study_stats (user_id, study_date, cards_studied, time_minutes,
                sessions_completed, easy_count, hard_count, again_count)
-               VALUES (?, 20, 15, 2, 10, 5, 5)""",
-            java.sql.Date.valueOf(today)
+               VALUES (?, ?, 20, 15, 2, 10, 5, 5)""",
+            sentinelUserId, java.sql.Date.valueOf(today)
         )
         jdbcTemplate.update(
-            """INSERT INTO daily_study_stats (study_date, cards_studied, time_minutes,
+            """INSERT INTO daily_study_stats (user_id, study_date, cards_studied, time_minutes,
                sessions_completed, easy_count, hard_count, again_count)
-               VALUES (?, 30, 20, 3, 15, 10, 5)""",
-            java.sql.Date.valueOf(threeDaysAgo)
+               VALUES (?, ?, 30, 20, 3, 15, 10, 5)""",
+            sentinelUserId, java.sql.Date.valueOf(threeDaysAgo)
         )
         jdbcTemplate.update(
-            """INSERT INTO daily_study_stats (study_date, cards_studied, time_minutes,
+            """INSERT INTO daily_study_stats (user_id, study_date, cards_studied, time_minutes,
                sessions_completed, easy_count, hard_count, again_count)
-               VALUES (?, 25, 18, 2, 12, 8, 5)""",
-            java.sql.Date.valueOf(fiveDaysAgo)
+               VALUES (?, ?, 25, 18, 2, 12, 8, 5)""",
+            sentinelUserId, java.sql.Date.valueOf(fiveDaysAgo)
         )
 
-        val response = statisticsService.getOverview(utcZone)
+        val response = statisticsService.getOverview(sentinelUserId, utcZone)
 
         assertThat(response.week.days).hasSize(7)
         assertThat(response.week.totalCardsStudied).isEqualTo(75) // 20 + 30 + 25
@@ -150,7 +150,7 @@ class StatisticsServiceTest {
         // Set up user statistics
         jdbcTemplate.update(
             """UPDATE user_statistics SET total_cards_studied = 500,
-               total_study_time_minutes = 300, total_sessions = 50 WHERE id = ?""",
+               total_study_time_minutes = 300, total_sessions = 50 WHERE user_id = ?""",
             sentinelUserId
         )
 
@@ -159,7 +159,7 @@ class StatisticsServiceTest {
         createTestDeck("Deck 2")
         createTestDeck("Deck 3")
 
-        val response = statisticsService.getOverview(utcZone)
+        val response = statisticsService.getOverview(sentinelUserId, utcZone)
 
         assertThat(response.allTime.totalCardsStudied).isEqualTo(500)
         assertThat(response.allTime.totalTimeMinutes).isEqualTo(300)
@@ -173,7 +173,7 @@ class StatisticsServiceTest {
 
     @Test
     fun `calculateStreak returns 0 when no study history`() {
-        val streak = statisticsService.calculateStreak(utcZone)
+        val streak = statisticsService.calculateStreak(sentinelUserId, utcZone)
 
         assertThat(streak.current).isEqualTo(0)
         assertThat(streak.longest).isEqualTo(0)
@@ -184,7 +184,7 @@ class StatisticsServiceTest {
         val today = LocalDate.now()
         insertDailyStats(today)
 
-        val streak = statisticsService.calculateStreak(utcZone)
+        val streak = statisticsService.calculateStreak(sentinelUserId, utcZone)
 
         assertThat(streak.current).isEqualTo(1)
     }
@@ -197,7 +197,7 @@ class StatisticsServiceTest {
             insertDailyStats(today.minusDays(i))
         }
 
-        val streak = statisticsService.calculateStreak(utcZone)
+        val streak = statisticsService.calculateStreak(sentinelUserId, utcZone)
 
         assertThat(streak.current).isEqualTo(5)
     }
@@ -212,7 +212,7 @@ class StatisticsServiceTest {
         insertDailyStats(today.minusDays(3))
         insertDailyStats(today.minusDays(4))
 
-        val streak = statisticsService.calculateStreak(utcZone)
+        val streak = statisticsService.calculateStreak(sentinelUserId, utcZone)
 
         assertThat(streak.current).isEqualTo(2) // Only today and yesterday
     }
@@ -225,7 +225,7 @@ class StatisticsServiceTest {
         insertDailyStats(today.minusDays(2))
         insertDailyStats(today.minusDays(3))
 
-        val streak = statisticsService.calculateStreak(utcZone)
+        val streak = statisticsService.calculateStreak(sentinelUserId, utcZone)
 
         assertThat(streak.current).isEqualTo(0) // Streak broken
     }
@@ -244,7 +244,7 @@ class StatisticsServiceTest {
             insertDailyStats(today.minusDays(i))
         }
 
-        val streak = statisticsService.calculateStreak(utcZone)
+        val streak = statisticsService.calculateStreak(sentinelUserId, utcZone)
 
         assertThat(streak.current).isEqualTo(2)
         assertThat(streak.longest).isGreaterThanOrEqualTo(5) // May be higher if previously stored
@@ -270,7 +270,7 @@ class StatisticsServiceTest {
         repeat(5) { createTestReviewOnDate(sessionId, cardId, "EASY", today.minusDays(10)) }
         repeat(5) { createTestReviewOnDate(sessionId, cardId, "AGAIN", today.minusDays(10)) }
 
-        val accuracy = statisticsService.calculateAccuracyWithTrend(7, utcZone)
+        val accuracy = statisticsService.calculateAccuracyWithTrend(sentinelUserId, 7, utcZone)
 
         assertThat(accuracy.trend).isEqualTo(AccuracyTrend.IMPROVING)
     }
@@ -291,7 +291,7 @@ class StatisticsServiceTest {
         repeat(9) { createTestReviewOnDate(sessionId, cardId, "EASY", today.minusDays(10)) }
         repeat(1) { createTestReviewOnDate(sessionId, cardId, "AGAIN", today.minusDays(10)) }
 
-        val accuracy = statisticsService.calculateAccuracyWithTrend(7, utcZone)
+        val accuracy = statisticsService.calculateAccuracyWithTrend(sentinelUserId, 7, utcZone)
 
         assertThat(accuracy.trend).isEqualTo(AccuracyTrend.DECLINING)
     }
@@ -312,7 +312,7 @@ class StatisticsServiceTest {
         repeat(7) { createTestReviewOnDate(sessionId, cardId, "EASY", today.minusDays(10)) }
         repeat(3) { createTestReviewOnDate(sessionId, cardId, "AGAIN", today.minusDays(10)) }
 
-        val accuracy = statisticsService.calculateAccuracyWithTrend(7, utcZone)
+        val accuracy = statisticsService.calculateAccuracyWithTrend(sentinelUserId, 7, utcZone)
 
         assertThat(accuracy.trend).isEqualTo(AccuracyTrend.STABLE)
     }
@@ -323,11 +323,11 @@ class StatisticsServiceTest {
 
     private fun insertDailyStats(date: LocalDate) {
         jdbcTemplate.update(
-            """INSERT INTO daily_study_stats (study_date, cards_studied, time_minutes,
+            """INSERT INTO daily_study_stats (user_id, study_date, cards_studied, time_minutes,
                sessions_completed, easy_count, hard_count, again_count)
-               VALUES (?, 10, 5, 1, 5, 3, 2)
-               ON CONFLICT (study_date) DO NOTHING""",
-            java.sql.Date.valueOf(date)
+               VALUES (?, ?, 10, 5, 1, 5, 3, 2)
+               ON CONFLICT (user_id, study_date) DO NOTHING""",
+            sentinelUserId, java.sql.Date.valueOf(date)
         )
     }
 
@@ -335,8 +335,8 @@ class StatisticsServiceTest {
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
-            "INSERT INTO decks (id, name, deck_type, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?)",
-            id, name, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
+            "INSERT INTO decks (id, name, deck_type, user_id, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?, ?)",
+            id, name, sentinelUserId, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
         )
         return id
     }

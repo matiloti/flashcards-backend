@@ -34,8 +34,8 @@ class FlashReviewService(
         data object SessionNotFound : GetSessionResult()
     }
 
-    fun startSession(deckId: UUID, shuffle: Boolean = true): StartSessionResult {
-        val deck = deckRepository.findById(deckId)
+    fun startSession(userId: UUID, deckId: UUID, shuffle: Boolean = true): StartSessionResult {
+        val deck = deckRepository.findById(deckId, userId)
             ?: return StartSessionResult.DeckNotFound
 
         if (deck.type != DeckType.FLASH_REVIEW) {
@@ -72,7 +72,7 @@ class FlashReviewService(
         )
     }
 
-    fun completeSession(sessionId: UUID, conceptsViewed: Int?): CompleteSessionResult {
+    fun completeSession(userId: UUID, sessionId: UUID, conceptsViewed: Int?): CompleteSessionResult {
         val session = studyRepository.findSessionById(sessionId)
             ?: return CompleteSessionResult.SessionNotFound
 
@@ -84,7 +84,8 @@ class FlashReviewService(
             return CompleteSessionResult.AlreadyCompleted
         }
 
-        val deck = deckRepository.findById(session.deckId)
+        // Verify the session's deck belongs to the current user
+        val deck = deckRepository.findById(session.deckId, userId)
             ?: return CompleteSessionResult.SessionNotFound
 
         val totalConcepts = cardRepository.findByDeckId(session.deckId).size
@@ -111,7 +112,7 @@ class FlashReviewService(
         )
     }
 
-    fun getSession(sessionId: UUID): GetSessionResult {
+    fun getSession(userId: UUID, sessionId: UUID): GetSessionResult {
         val session = studyRepository.findSessionById(sessionId)
             ?: return GetSessionResult.SessionNotFound
 
@@ -119,7 +120,8 @@ class FlashReviewService(
             return GetSessionResult.SessionNotFound
         }
 
-        val deck = deckRepository.findById(session.deckId)
+        // Verify the session's deck belongs to the current user
+        val deck = deckRepository.findById(session.deckId, userId)
             ?: return GetSessionResult.SessionNotFound
 
         val totalConcepts = cardRepository.findByDeckId(session.deckId).size

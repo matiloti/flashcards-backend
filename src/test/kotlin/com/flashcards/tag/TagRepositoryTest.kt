@@ -380,6 +380,9 @@ class TagRepositoryTest {
     }
 
     private fun createTagForUser(name: String, userId: UUID): UUID {
+        // Ensure the user exists first (create if not exists)
+        ensureUserExists(userId)
+
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
@@ -389,12 +392,22 @@ class TagRepositoryTest {
         return id
     }
 
+    private fun ensureUserExists(userId: UUID) {
+        val now = Instant.now()
+        jdbcTemplate.update(
+            """INSERT INTO users (id, email, password_hash, display_name, created_at, updated_at)
+               VALUES (?, ?, 'test-hash', 'Test User', ?, ?)
+               ON CONFLICT (id) DO NOTHING""",
+            userId, "test-${userId}@example.com", java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
+        )
+    }
+
     private fun createDeck(name: String): UUID {
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
-            "INSERT INTO decks (id, name, deck_type, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?)",
-            id, name, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
+            "INSERT INTO decks (id, name, deck_type, user_id, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?, ?)",
+            id, name, sentinelUserId, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
         )
         return id
     }

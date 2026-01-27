@@ -12,3 +12,11 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:default-dev-secret-key-that-is-at-least-32-bytes-long-for-hs256}
+      access-token-expiry-seconds: 900
+      refresh-token-expiry-seconds: 2592000
+      issuer: flashcards-api

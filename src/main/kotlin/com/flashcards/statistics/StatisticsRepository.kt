@@ -11,23 +11,18 @@ import java.util.UUID
 
 /**
  * Repository for statistics-related database operations.
- * Uses the sentinel user ID for single-user app (no auth yet).
  */
 @Repository
 class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
 
-    companion object {
-        val SENTINEL_USER_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000000001")
-    }
-
     /**
      * Get cumulative user statistics from the denormalized user_statistics table.
      */
-    fun getUserStats(): UserStatistics {
+    fun getUserStats(userId: UUID): UserStatistics {
         val results = jdbcTemplate.query(
-            """SELECT id, current_streak, longest_streak, last_study_date,
+            """SELECT id, user_id, current_streak, longest_streak, last_study_date,
                total_cards_studied, total_study_time_minutes, total_sessions
-               FROM user_statistics WHERE id = ?""",
+               FROM user_statistics WHERE user_id = ?""",
             { rs, _ ->
                 UserStatistics(
                     id = UUID.fromString(rs.getString("id")),
@@ -39,11 +34,11 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
                     totalSessions = rs.getInt("total_sessions")
                 )
             },
-            SENTINEL_USER_ID
+            userId
         )
 
         return results.firstOrNull() ?: UserStatistics(
-            id = SENTINEL_USER_ID,
+            id = userId,
             currentStreak = 0,
             longestStreak = 0,
             lastStudyDate = null,
@@ -57,12 +52,12 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
      * Get daily study stats for a date range.
      * Returns stats ordered by study_date ASC.
      */
-    fun getDailyStats(startDate: LocalDate, endDate: LocalDate, zoneId: ZoneId): List<DailyStudyStats> {
+    fun getDailyStats(userId: UUID, startDate: LocalDate, endDate: LocalDate, zoneId: ZoneId): List<DailyStudyStats> {
         return jdbcTemplate.query(
             """SELECT study_date, cards_studied, time_minutes, sessions_completed,
                easy_count, hard_count, again_count
                FROM daily_study_stats
-               WHERE study_date >= ? AND study_date <= ?
+               WHERE user_id = ? AND study_date >= ? AND study_date <= ?
                ORDER BY study_date ASC""",
             { rs, _ ->
                 DailyStudyStats(
@@ -75,31 +70,43 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
                     againCount = rs.getInt("again_count")
                 )
             },
+            userId,
             Date.valueOf(startDate),
             Date.valueOf(endDate)
         )
     }
 
     /**
-     * Get card progress counts aggregated by mastery level.
+     * Get card progress counts aggregated by mastery level for a user's cards.
      * Counts cards with no card_progress entry as NEW.
      */
-    fun getCardProgressCounts(): CardProgressStats {
-        // Get total cards count
+    fun getCardProgressCounts(userId: UUID): CardProgressStats {
+        // Get total cards count for user's decks
         val totalCards = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM cards",
-            Int::class.java
+            """SELECT COUNT(*) FROM cards c
+               JOIN decks d ON c.deck_id = d.id
+               WHERE d.user_id = ?""",
+            Int::class.java,
+            userId
         ) ?: 0
 
-        // Get counts by mastery level from card_progress
+        // Get counts by mastery level from card_progress for user's cards
         val masteredCount = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM card_progress WHERE mastery_level = 'MASTERED'",
-            Int::class.java
+            """SELECT COUNT(*) FROM card_progress cp
+               JOIN cards c ON cp.card_id = c.id
+               JOIN decks d ON c.deck_id = d.id
+               WHERE d.user_id = ? AND cp.mastery_level = 'MASTERED'""",
+            Int::class.java,
+            userId
         ) ?: 0
 
         val learningCount = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM card_progress WHERE mastery_level = 'LEARNING'",
-            Int::class.java
+            """SELECT COUNT(*) FROM card_progress cp
+               JOIN cards c ON cp.card_id = c.id
+               JOIN decks d ON c.deck_id = d.id
+               WHERE d.user_id = ? AND cp.mastery_level = 'LEARNING'""",
+            Int::class.java,
+            userId
         ) ?: 0
 
         // NEW = total cards - cards with card_progress entries
@@ -118,17 +125,20 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
      * Get accuracy statistics for the specified period.
      * Calculates accuracy as (easy + hard) / (easy + hard + again).
      */
-    fun getAccuracyStats(periodDays: Int, zoneId: ZoneId): AccuracyStats {
+    fun getAccuracyStats(userId: UUID, periodDays: Int, zoneId: ZoneId): AccuracyStats {
         val cutoffDate = LocalDate.now(zoneId).minusDays(periodDays.toLong())
 
         val counts = jdbcTemplate.query(
-            """SELECT rating, COUNT(*) as cnt
-               FROM card_reviews
-               WHERE DATE(reviewed_at AT TIME ZONE 'UTC') >= ?
-               GROUP BY rating""",
+            """SELECT cr.rating, COUNT(*) as cnt
+               FROM card_reviews cr
+               JOIN study_sessions ss ON cr.session_id = ss.id
+               JOIN decks d ON ss.deck_id = d.id
+               WHERE d.user_id = ? AND DATE(cr.reviewed_at AT TIME ZONE 'UTC') >= ?
+               GROUP BY cr.rating""",
             { rs, _ ->
                 rs.getString("rating") to rs.getInt("cnt")
             },
+            userId,
             Date.valueOf(cutoffDate)
         ).toMap()
 
@@ -156,16 +166,20 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
     /**
      * Get accuracy stats for a specific date range (used for trend calculation).
      */
-    fun getAccuracyStatsForRange(startDate: LocalDate, endDate: LocalDate): AccuracyStats {
+    fun getAccuracyStatsForRange(userId: UUID, startDate: LocalDate, endDate: LocalDate): AccuracyStats {
         val counts = jdbcTemplate.query(
-            """SELECT rating, COUNT(*) as cnt
-               FROM card_reviews
-               WHERE DATE(reviewed_at AT TIME ZONE 'UTC') >= ?
-                 AND DATE(reviewed_at AT TIME ZONE 'UTC') <= ?
-               GROUP BY rating""",
+            """SELECT cr.rating, COUNT(*) as cnt
+               FROM card_reviews cr
+               JOIN study_sessions ss ON cr.session_id = ss.id
+               JOIN decks d ON ss.deck_id = d.id
+               WHERE d.user_id = ?
+                 AND DATE(cr.reviewed_at AT TIME ZONE 'UTC') >= ?
+                 AND DATE(cr.reviewed_at AT TIME ZONE 'UTC') <= ?
+               GROUP BY cr.rating""",
             { rs, _ ->
                 rs.getString("rating") to rs.getInt("cnt")
             },
+            userId,
             Date.valueOf(startDate),
             Date.valueOf(endDate)
         ).toMap()
@@ -192,10 +206,10 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
     }
 
     /**
-     * Get top decks by most recent study activity.
+     * Get top decks by most recent study activity for a user.
      * Only returns decks that have been studied (last_studied_at IS NOT NULL).
      */
-    fun getTopDecks(limit: Int): List<DeckProgressStats> {
+    fun getTopDecks(userId: UUID, limit: Int): List<DeckProgressStats> {
         return jdbcTemplate.query(
             """SELECT d.id, d.name, d.last_studied_at,
                       COUNT(DISTINCT c.id) as total_cards,
@@ -203,7 +217,7 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
                FROM decks d
                LEFT JOIN cards c ON c.deck_id = d.id
                LEFT JOIN card_progress cp ON cp.card_id = c.id
-               WHERE d.last_studied_at IS NOT NULL
+               WHERE d.user_id = ? AND d.last_studied_at IS NOT NULL
                GROUP BY d.id, d.name, d.last_studied_at
                ORDER BY d.last_studied_at DESC
                LIMIT ?""",
@@ -225,15 +239,19 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
                     lastStudiedAt = rs.getTimestamp("last_studied_at")?.toInstant()
                 )
             },
-            limit
+            userId, limit
         )
     }
 
     /**
-     * Get total number of decks.
+     * Get total number of decks for a user.
      */
-    fun getDeckCount(): Int {
-        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM decks", Int::class.java) ?: 0
+    fun getDeckCount(userId: UUID): Int {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM decks WHERE user_id = ?",
+            Int::class.java,
+            userId
+        ) ?: 0
     }
 
     /**
@@ -241,6 +259,7 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
      * Increments totals and updates streak if necessary.
      */
     fun updateUserStats(
+        userId: UUID,
         cardsStudied: Int,
         studyTimeMinutes: Int,
         sessionsCompleted: Int,
@@ -253,28 +272,28 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
                    total_sessions = total_sessions + ?,
                    last_study_date = ?,
                    updated_at = NOW()
-               WHERE id = ?""",
+               WHERE user_id = ?""",
             cardsStudied,
             studyTimeMinutes,
             sessionsCompleted,
             Date.valueOf(studyDate),
-            SENTINEL_USER_ID
+            userId
         )
     }
 
     /**
      * Update streak in user_statistics.
      */
-    fun updateStreak(currentStreak: Int, longestStreak: Int) {
+    fun updateStreak(userId: UUID, currentStreak: Int, longestStreak: Int) {
         jdbcTemplate.update(
             """UPDATE user_statistics
                SET current_streak = ?,
                    longest_streak = GREATEST(longest_streak, ?),
                    updated_at = NOW()
-               WHERE id = ?""",
+               WHERE user_id = ?""",
             currentStreak,
             longestStreak,
-            SENTINEL_USER_ID
+            userId
         )
     }
 
@@ -283,6 +302,7 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
      * Increments counts if entry already exists for the date.
      */
     fun upsertDailyStats(
+        userId: UUID,
         studyDate: LocalDate,
         cardsStudied: Int,
         timeMinutes: Int,
@@ -292,9 +312,9 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
     ) {
         jdbcTemplate.update(
             """INSERT INTO daily_study_stats
-               (study_date, cards_studied, time_minutes, sessions_completed, easy_count, hard_count, again_count)
-               VALUES (?, ?, ?, 1, ?, ?, ?)
-               ON CONFLICT (study_date) DO UPDATE SET
+               (user_id, study_date, cards_studied, time_minutes, sessions_completed, easy_count, hard_count, again_count)
+               VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+               ON CONFLICT (user_id, study_date) DO UPDATE SET
                    cards_studied = daily_study_stats.cards_studied + EXCLUDED.cards_studied,
                    time_minutes = daily_study_stats.time_minutes + EXCLUDED.time_minutes,
                    sessions_completed = daily_study_stats.sessions_completed + 1,
@@ -302,6 +322,7 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
                    hard_count = daily_study_stats.hard_count + EXCLUDED.hard_count,
                    again_count = daily_study_stats.again_count + EXCLUDED.again_count,
                    updated_at = NOW()""",
+            userId,
             Date.valueOf(studyDate),
             cardsStudied,
             timeMinutes,
@@ -361,24 +382,26 @@ class StatisticsRepository(private val jdbcTemplate: JdbcTemplate) {
     /**
      * Get all study dates in descending order (for streak calculation).
      */
-    fun getStudyDates(): List<LocalDate> {
+    fun getStudyDates(userId: UUID): List<LocalDate> {
         return jdbcTemplate.query(
-            "SELECT study_date FROM daily_study_stats ORDER BY study_date DESC"
-        ) { rs, _ ->
-            rs.getDate("study_date").toLocalDate()
-        }
+            "SELECT study_date FROM daily_study_stats WHERE user_id = ? ORDER BY study_date DESC",
+            { rs, _ ->
+                rs.getDate("study_date").toLocalDate()
+            },
+            userId
+        )
     }
 
     /**
      * Ensure user_statistics row exists.
      */
-    fun ensureUserStatsExists() {
+    fun ensureUserStatsExists(userId: UUID) {
         jdbcTemplate.update(
-            """INSERT INTO user_statistics (id, current_streak, longest_streak,
+            """INSERT INTO user_statistics (id, user_id, current_streak, longest_streak,
                total_cards_studied, total_study_time_minutes, total_sessions)
-               VALUES (?, 0, 0, 0, 0, 0)
-               ON CONFLICT (id) DO NOTHING""",
-            SENTINEL_USER_ID
+               VALUES (gen_random_uuid(), ?, 0, 0, 0, 0, 0)
+               ON CONFLICT (user_id) DO NOTHING""",
+            userId
         )
     }
 }

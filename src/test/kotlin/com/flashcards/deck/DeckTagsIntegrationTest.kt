@@ -289,8 +289,8 @@ class DeckTagsIntegrationTest {
         val id = UUID.randomUUID()
         val now = Instant.now()
         jdbcTemplate.update(
-            "INSERT INTO decks (id, name, deck_type, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?)",
-            id, name, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
+            "INSERT INTO decks (id, name, deck_type, user_id, created_at, updated_at) VALUES (?, ?, 'STUDY', ?, ?, ?)",
+            id, name, sentinelUserId, java.sql.Timestamp.from(now), java.sql.Timestamp.from(now)
         )
         return id
     }

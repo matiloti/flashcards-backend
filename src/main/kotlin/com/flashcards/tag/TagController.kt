@@ -1,7 +1,9 @@
 package com.flashcards.tag
 
+import com.flashcards.security.JwtAuthentication
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
@@ -10,9 +12,15 @@ import java.util.UUID
 class TagController(private val tagService: TagService) {
 
     companion object {
-        // Single-user mode sentinel user ID
-        private val SENTINEL_USER_ID = UUID.fromString("00000000-0000-0000-0000-000000000001")
         private const val MAX_SIZE = 100
+    }
+
+    /**
+     * Get the current authenticated user's ID from the SecurityContext.
+     */
+    private fun getCurrentUserId(): UUID {
+        val authentication = SecurityContextHolder.getContext().authentication as JwtAuthentication
+        return authentication.userId
     }
 
     /**
@@ -43,7 +51,8 @@ class TagController(private val tagService: TagService) {
             )
         }
 
-        val result = tagService.getTagsPaginated(SENTINEL_USER_ID, page, size, sort)
+        val userId = getCurrentUserId()
+        val result = tagService.getTagsPaginated(userId, page, size, sort)
         return ResponseEntity.ok(result)
     }
 
@@ -53,8 +62,9 @@ class TagController(private val tagService: TagService) {
      */
     @PostMapping
     fun createTag(@RequestBody request: CreateTagRequest): ResponseEntity<Any> {
+        val userId = getCurrentUserId()
         return try {
-            val tag = tagService.createTag(SENTINEL_USER_ID, request)
+            val tag = tagService.createTag(userId, request)
             ResponseEntity.status(HttpStatus.CREATED).body(tag)
         } catch (e: DuplicateTagNameException) {
             ResponseEntity.status(HttpStatus.CONFLICT).body(
@@ -81,8 +91,9 @@ class TagController(private val tagService: TagService) {
      */
     @GetMapping("/{tagId}")
     fun getTag(@PathVariable tagId: UUID): ResponseEntity<Any> {
+        val userId = getCurrentUserId()
         return try {
-            val tag = tagService.getTagById(SENTINEL_USER_ID, tagId)
+            val tag = tagService.getTagById(userId, tagId)
             ResponseEntity.ok(tag)
         } catch (e: TagNotFoundException) {
             ResponseEntity.status(HttpStatus.NOT_FOUND).body(
@@ -103,8 +114,9 @@ class TagController(private val tagService: TagService) {
         @PathVariable tagId: UUID,
         @RequestBody request: UpdateTagRequest
     ): ResponseEntity<Any> {
+        val userId = getCurrentUserId()
         return try {
-            val tag = tagService.updateTag(SENTINEL_USER_ID, tagId, request)
+            val tag = tagService.updateTag(userId, tagId, request)
             ResponseEntity.ok(tag)
         } catch (e: TagNotFoundException) {
             ResponseEntity.status(HttpStatus.NOT_FOUND).body(
@@ -138,8 +150,9 @@ class TagController(private val tagService: TagService) {
      */
     @DeleteMapping("/{tagId}")
     fun deleteTag(@PathVariable tagId: UUID): ResponseEntity<Any> {
+        val userId = getCurrentUserId()
         return try {
-            tagService.deleteTag(SENTINEL_USER_ID, tagId)
+            tagService.deleteTag(userId, tagId)
             ResponseEntity.noContent().build()
         } catch (e: TagNotFoundException) {
             ResponseEntity.status(HttpStatus.NOT_FOUND).body(
