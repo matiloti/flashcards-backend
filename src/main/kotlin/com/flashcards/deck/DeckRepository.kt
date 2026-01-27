@@ -207,4 +207,54 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
             updatedAt = rs.getTimestamp("updated_at").toInstant()
         )
     }
+
+    /**
+     * Find decks filtered by tag ID.
+     */
+    fun findAllByTagId(tagId: UUID): List<Deck> {
+        return jdbcTemplate.query(
+            """
+            SELECT d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at,
+                   COUNT(DISTINCT c.id) AS card_count
+            FROM decks d
+            INNER JOIN deck_tags dt ON d.id = dt.deck_id AND dt.tag_id = ?
+            LEFT JOIN cards c ON c.deck_id = d.id
+            GROUP BY d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at
+            ORDER BY d.updated_at DESC
+            """.trimIndent(),
+            rowMapper,
+            tagId
+        )
+    }
+
+    /**
+     * Find decks that have no tags (untagged).
+     */
+    fun findAllUntagged(): List<Deck> {
+        return jdbcTemplate.query(
+            """
+            SELECT d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at,
+                   COUNT(DISTINCT c.id) AS card_count
+            FROM decks d
+            LEFT JOIN deck_tags dt ON d.id = dt.deck_id
+            LEFT JOIN cards c ON c.deck_id = d.id
+            WHERE dt.deck_id IS NULL
+            GROUP BY d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at
+            ORDER BY d.updated_at DESC
+            """.trimIndent(),
+            rowMapper
+        )
+    }
+
+    /**
+     * Check if a deck exists by ID.
+     */
+    fun existsById(id: UUID): Boolean {
+        val count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM decks WHERE id = ?",
+            Int::class.java,
+            id
+        )
+        return count != null && count > 0
+    }
 }

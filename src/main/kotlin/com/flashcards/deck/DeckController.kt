@@ -1,17 +1,36 @@
 package com.flashcards.deck
 
 import com.flashcards.common.Page
+import com.flashcards.tag.*
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
+import java.util.UUID
 
 @RestController
 @RequestMapping("/api/v1/decks")
-class DeckController(private val repository: DeckRepository) {
+class DeckController(
+    private val repository: DeckRepository,
+    private val deckService: DeckService
+) {
 
     @GetMapping
-    fun listDecks(): ResponseEntity<List<Deck>> {
-        return ResponseEntity.ok(repository.findAll())
+    fun listDecks(
+        @RequestParam(required = false) tagId: UUID?,
+        @RequestParam(required = false) untagged: Boolean?
+    ): ResponseEntity<Any> {
+        // Validate mutually exclusive filters
+        if (tagId != null && untagged == true) {
+            return ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to "CONFLICTING_FILTERS",
+                    "message" to "Cannot specify both tagId and untagged filters"
+                )
+            )
+        }
+
+        val decks = deckService.getAllDecks(tagId, untagged)
+        return ResponseEntity.ok(decks)
     }
 
     /**
@@ -93,27 +112,47 @@ class DeckController(private val repository: DeckRepository) {
     }
 
     @GetMapping("/{deckId}")
-    fun getDeck(@PathVariable deckId: java.util.UUID): ResponseEntity<Deck> {
-        val deck = repository.findById(deckId) ?: return ResponseEntity.notFound().build()
+    fun getDeck(@PathVariable deckId: UUID): ResponseEntity<Any> {
+        val deck = deckService.getDeckById(deckId) ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(deck)
     }
 
     @PostMapping
-    fun createDeck(@RequestBody request: CreateDeckRequest): ResponseEntity<Deck> {
+    fun createDeck(@RequestBody request: CreateDeckRequest): ResponseEntity<Any> {
         val name = request.name.trim()
         if (name.isBlank() || name.length > 100) {
             return ResponseEntity.badRequest().build()
         }
-        val type = request.type ?: DeckType.STUDY
-        val deck = repository.create(name, type)
-        return ResponseEntity.status(HttpStatus.CREATED).body(deck)
+
+        return try {
+            val deck = deckService.createDeck(request)
+            ResponseEntity.status(HttpStatus.CREATED).body(deck)
+        } catch (e: TooManyTagsException) {
+            ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to "TOO_MANY_TAGS",
+                    "message" to e.message,
+                    "field" to "tagIds",
+                    "max" to e.max,
+                    "provided" to e.provided
+                )
+            )
+        } catch (e: InvalidTagIdsException) {
+            ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to "INVALID_TAG_IDS",
+                    "message" to "One or more tag IDs are invalid",
+                    "invalidIds" to e.invalidIds.map { it.toString() }
+                )
+            )
+        }
     }
 
     @PutMapping("/{deckId}")
     fun updateDeck(
-        @PathVariable deckId: java.util.UUID,
+        @PathVariable deckId: UUID,
         @RequestBody request: UpdateDeckRequest
-    ): ResponseEntity<Deck> {
+    ): ResponseEntity<Any> {
         val name = request.name.trim()
         if (name.isBlank() || name.length > 100) {
             return ResponseEntity.badRequest().build()
@@ -122,16 +161,51 @@ class DeckController(private val repository: DeckRepository) {
         if (!updated) {
             return ResponseEntity.notFound().build()
         }
-        val deck = repository.findById(deckId) ?: return ResponseEntity.notFound().build()
+        val deck = deckService.getDeckById(deckId) ?: return ResponseEntity.notFound().build()
         return ResponseEntity.ok(deck)
     }
 
     @DeleteMapping("/{deckId}")
-    fun deleteDeck(@PathVariable deckId: java.util.UUID): ResponseEntity<Void> {
+    fun deleteDeck(@PathVariable deckId: UUID): ResponseEntity<Void> {
         val deleted = repository.delete(deckId)
         if (!deleted) {
             return ResponseEntity.notFound().build()
         }
         return ResponseEntity.noContent().build()
+    }
+
+    /**
+     * PATCH /api/v1/decks/{deckId}/tags
+     * Update the tags assigned to a deck.
+     */
+    @PatchMapping("/{deckId}/tags")
+    fun updateDeckTags(
+        @PathVariable deckId: UUID,
+        @RequestBody request: UpdateDeckTagsRequest
+    ): ResponseEntity<Any> {
+        return try {
+            val deck = deckService.updateDeckTags(deckId, request.tagIds)
+            ResponseEntity.ok(deck)
+        } catch (e: DeckNotFoundException) {
+            ResponseEntity.notFound().build()
+        } catch (e: TooManyTagsException) {
+            ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to "TOO_MANY_TAGS",
+                    "message" to e.message,
+                    "field" to "tagIds",
+                    "max" to e.max,
+                    "provided" to e.provided
+                )
+            )
+        } catch (e: InvalidTagIdsException) {
+            ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to "INVALID_TAG_IDS",
+                    "message" to "One or more tag IDs are invalid",
+                    "invalidIds" to e.invalidIds.map { it.toString() }
+                )
+            )
+        }
     }
 }
