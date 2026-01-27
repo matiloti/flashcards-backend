@@ -1,5 +1,6 @@
 package com.flashcards.deck
 
+import com.flashcards.common.Page
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -11,6 +12,61 @@ class DeckController(private val repository: DeckRepository) {
     @GetMapping
     fun listDecks(): ResponseEntity<List<Deck>> {
         return ResponseEntity.ok(repository.findAll())
+    }
+
+    /**
+     * Search for decks by name and description.
+     *
+     * @param q Search query (min 2 characters, max 100 characters)
+     * @param page Page number (0-indexed, default 0)
+     * @param size Page size (1-50, default 20)
+     * @return Paginated search results sorted by relevance
+     */
+    @GetMapping("/search")
+    fun searchDecks(
+        @RequestParam(required = false) q: String?,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int
+    ): ResponseEntity<Any> {
+        // Validate query parameter
+        val trimmedQuery = q?.trim() ?: ""
+        if (trimmedQuery.isBlank()) {
+            return ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to "MISSING_QUERY",
+                    "message" to "Search query parameter 'q' is required"
+                )
+            )
+        }
+        if (trimmedQuery.length < 2) {
+            return ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to "QUERY_TOO_SHORT",
+                    "message" to "Search query must be at least 2 characters"
+                )
+            )
+        }
+        if (trimmedQuery.length > 100) {
+            return ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to "QUERY_TOO_LONG",
+                    "message" to "Search query must not exceed 100 characters"
+                )
+            )
+        }
+
+        // Validate pagination parameters
+        if (page < 0 || size < 1 || size > 50) {
+            return ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to "INVALID_PAGINATION",
+                    "message" to "Page must be >= 0, size must be 1-50"
+                )
+            )
+        }
+
+        val results = repository.search(trimmedQuery, page, size)
+        return ResponseEntity.ok(results)
     }
 
     /**

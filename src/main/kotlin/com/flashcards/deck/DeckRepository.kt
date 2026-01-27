@@ -1,11 +1,13 @@
 package com.flashcards.deck
 
+import com.flashcards.common.Page
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Repository
 import java.sql.ResultSet
 import java.time.Instant
 import java.util.UUID
+import kotlin.math.ceil
 
 @Repository
 class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
@@ -122,5 +124,87 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
             java.sql.Timestamp.from(lastStudiedAt), id
         )
         return updated > 0
+    }
+
+    /**
+     * Search for decks by name and description using ILIKE pattern matching.
+     *
+     * Results are ranked with name matches appearing before description-only matches,
+     * and alphabetically sorted by name within each group.
+     *
+     * @param query Search query (min 2 chars, already validated by controller)
+     * @param page Page number (0-indexed)
+     * @param size Page size (1-50)
+     * @return Paginated search results with matchedField indicator
+     */
+    fun search(query: String, page: Int, size: Int): Page<DeckSearchResponse> {
+        val offset = page * size
+
+        val searchSql = """
+            SELECT
+                d.id,
+                d.name,
+                d.description,
+                d.deck_type,
+                d.last_studied_at,
+                d.created_at,
+                d.updated_at,
+                COUNT(c.id) AS card_count,
+                CASE
+                    WHEN d.name ILIKE '%' || ? || '%' THEN 'name'
+                    ELSE 'description'
+                END AS matched_field
+            FROM decks d
+            LEFT JOIN cards c ON d.id = c.deck_id
+            WHERE
+                d.name ILIKE '%' || ? || '%'
+                OR d.description ILIKE '%' || ? || '%'
+            GROUP BY d.id
+            ORDER BY
+                CASE WHEN d.name ILIKE '%' || ? || '%' THEN 0 ELSE 1 END,
+                d.name ASC
+            LIMIT ? OFFSET ?
+        """.trimIndent()
+
+        val countSql = """
+            SELECT COUNT(*)
+            FROM decks d
+            WHERE
+                d.name ILIKE '%' || ? || '%'
+                OR d.description ILIKE '%' || ? || '%'
+        """.trimIndent()
+
+        val results = jdbcTemplate.query(
+            searchSql,
+            { rs, _ -> mapToDeckSearchResponse(rs) },
+            query, query, query, query, size, offset
+        )
+
+        val totalElements = jdbcTemplate.queryForObject(countSql, Long::class.java, query, query)
+        val totalPages = if (totalElements == 0L) 0 else ceil(totalElements.toDouble() / size).toInt()
+
+        return Page(
+            content = results,
+            totalElements = totalElements,
+            totalPages = totalPages,
+            number = page,
+            size = size,
+            first = page == 0,
+            last = page >= totalPages - 1 || totalPages == 0
+        )
+    }
+
+    private fun mapToDeckSearchResponse(rs: ResultSet): DeckSearchResponse {
+        return DeckSearchResponse(
+            id = UUID.fromString(rs.getString("id")),
+            name = rs.getString("name"),
+            description = rs.getString("description"),
+            type = DeckType.valueOf(rs.getString("deck_type")),
+            cardCount = rs.getInt("card_count"),
+            lastStudiedAt = rs.getTimestamp("last_studied_at")?.toInstant(),
+            matchedField = rs.getString("matched_field"),
+            createdAt = rs.getTimestamp("created_at").toInstant(),
+            updatedAt = rs.getTimestamp("updated_at").toInstant()
+        )
     }
 }
