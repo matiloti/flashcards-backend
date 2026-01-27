@@ -270,4 +270,32 @@ class FlashReviewControllerTest {
                 .andExpect(jsonPath("$.concepts[1].term").value("Sliding Window"))
         }
     }
+
+    @Test
+    fun `complete flash review session updates deck lastStudiedAt`() {
+        // Verify deck has null lastStudiedAt initially
+        mockMvc.perform(get("/api/v1/decks/$flashReviewDeckId"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lastStudiedAt").value(null as Any?))
+
+        // Start session
+        val sessionResult = mockMvc.perform(
+            post("/api/v1/decks/$flashReviewDeckId/flash-review")
+        ).andReturn()
+        val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+        // Complete session
+        val completeResult = mockMvc.perform(
+            post("/api/v1/flash-review/$sessionId/complete")
+        )
+            .andExpect(status().isOk)
+            .andReturn()
+
+        val completedAt = objectMapper.readTree(completeResult.response.contentAsString)["completedAt"].asText()
+
+        // Verify deck now has lastStudiedAt set to completedAt
+        mockMvc.perform(get("/api/v1/decks/$flashReviewDeckId"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lastStudiedAt").value(completedAt))
+    }
 }

@@ -10,7 +10,8 @@ import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import org.testcontainers.junit.jupiter.Testcontainers
 
@@ -153,5 +154,75 @@ class StudyControllerTest {
             post("/api/v1/study/00000000-0000-0000-0000-000000000000/complete")
         )
             .andExpect(status().isNotFound)
+    }
+
+    @Test
+    fun `complete session updates deck lastStudiedAt`() {
+        // Verify deck has null lastStudiedAt initially
+        mockMvc.perform(get("/api/v1/decks/$deckId"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lastStudiedAt").value(null as Any?))
+
+        // Start session
+        val sessionResult = mockMvc.perform(
+            post("/api/v1/decks/$deckId/study")
+        ).andReturn()
+        val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+        // Submit review
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/reviews")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"cardId": "$cardId", "rating": "EASY"}""")
+        )
+
+        // Complete session
+        val completeResult = mockMvc.perform(
+            post("/api/v1/study/$sessionId/complete")
+        )
+            .andExpect(status().isOk)
+            .andReturn()
+
+        val completedAt = objectMapper.readTree(completeResult.response.contentAsString)["completedAt"].asText()
+
+        // Verify deck now has lastStudiedAt set to completedAt
+        mockMvc.perform(get("/api/v1/decks/$deckId"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lastStudiedAt").value(completedAt))
+    }
+
+    @Test
+    fun `complete session updates deck lastStudiedAt to most recent time`() {
+        // Set initial lastStudiedAt
+        val oldTime = java.sql.Timestamp.valueOf("2026-01-01 10:00:00")
+        jdbcTemplate.update(
+            "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+            oldTime, deckId
+        )
+
+        // Start and complete new session
+        val sessionResult = mockMvc.perform(
+            post("/api/v1/decks/$deckId/study")
+        ).andReturn()
+        val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/reviews")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"cardId": "$cardId", "rating": "EASY"}""")
+        )
+
+        val completeResult = mockMvc.perform(
+            post("/api/v1/study/$sessionId/complete")
+        )
+            .andExpect(status().isOk)
+            .andReturn()
+
+        val completedAt = objectMapper.readTree(completeResult.response.contentAsString)["completedAt"].asText()
+
+        // Verify deck lastStudiedAt is updated to new completedAt
+        mockMvc.perform(get("/api/v1/decks/$deckId"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.lastStudiedAt").value(completedAt))
     }
 }

@@ -237,7 +237,7 @@ class DeckControllerTest {
     // ==================== lastStudiedAt Tests ====================
 
     @Test
-    fun `deck with completed study sessions returns lastStudiedAt as max completed_at`() {
+    fun `deck with lastStudiedAt set returns correct value`() {
         // Create deck
         val createResult = mockMvc.perform(
             post("/api/v1/decks")
@@ -250,22 +250,11 @@ class DeckControllerTest {
         val deckId = com.fasterxml.jackson.databind.ObjectMapper()
             .readTree(createResult.response.contentAsString)["id"].asText()
 
-        // Insert completed study sessions directly via SQL
-        val session1Time = java.sql.Timestamp.valueOf("2026-01-25 10:00:00")
-        val session2Time = java.sql.Timestamp.valueOf("2026-01-26 14:30:00")  // This is the MAX
-        val session3Time = java.sql.Timestamp.valueOf("2026-01-24 08:00:00")
-
+        // Set last_studied_at directly on the deck (as happens when session completes)
+        val studiedTime = java.sql.Timestamp.valueOf("2026-01-26 14:30:00")
         jdbcTemplate.update(
-            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), ?)",
-            deckId, session1Time
-        )
-        jdbcTemplate.update(
-            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), ?)",
-            deckId, session2Time
-        )
-        jdbcTemplate.update(
-            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), ?)",
-            deckId, session3Time
+            "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+            studiedTime, deckId
         )
 
         // Verify GET by ID returns correct lastStudiedAt
@@ -372,18 +361,14 @@ class DeckControllerTest {
         val deckId3 = com.fasterxml.jackson.databind.ObjectMapper()
             .readTree(result3.response.contentAsString)["id"].asText()
 
-        // Add completed session to deck 1
+        // Set last_studied_at for deck 1 (simulating completed session)
         val sessionTime = java.sql.Timestamp.valueOf("2026-01-26 12:00:00")
         jdbcTemplate.update(
-            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), ?)",
-            deckId1, sessionTime
+            "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+            sessionTime, deckId1
         )
 
-        // Add incomplete session to deck 3
-        jdbcTemplate.update(
-            "INSERT INTO study_sessions (id, deck_id, started_at, completed_at) VALUES (gen_random_uuid(), ?::uuid, NOW(), NULL)",
-            deckId3
-        )
+        // Deck 3 has no last_studied_at set (simulating only incomplete sessions or never studied)
 
         // Verify list returns correct values for all - using direct index access after verifying the data
         val response = mockMvc.perform(get("/api/v1/decks"))
@@ -408,5 +393,225 @@ class DeckControllerTest {
                 }
             }
         }
+    }
+
+    // ==================== GET /api/v1/decks/recent Tests ====================
+
+    @Test
+    fun `get recent decks returns empty list when no decks have been studied`() {
+        // Create some decks without any completed study sessions
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Never Studied 1"}""")
+        )
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Never Studied 2"}""")
+        )
+
+        mockMvc.perform(get("/api/v1/decks/recent"))
+            .andExpect(status().isOk)
+            .andExpect(content().json("[]"))
+    }
+
+    @Test
+    fun `get recent decks returns studied decks ordered by lastStudiedAt desc`() {
+        // Create 3 decks
+        val deck1Result = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Oldest Studied"}""")
+        ).andReturn()
+        val deck1Id = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(deck1Result.response.contentAsString)["id"].asText()
+
+        val deck2Result = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Most Recent"}""")
+        ).andReturn()
+        val deck2Id = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(deck2Result.response.contentAsString)["id"].asText()
+
+        val deck3Result = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Middle Studied"}""")
+        ).andReturn()
+        val deck3Id = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(deck3Result.response.contentAsString)["id"].asText()
+
+        // Create cards for each deck (required for study sessions)
+        jdbcTemplate.update(
+            "INSERT INTO cards (id, deck_id, front_text, back_text) VALUES (gen_random_uuid(), ?::uuid, 'Q', 'A')",
+            deck1Id
+        )
+        jdbcTemplate.update(
+            "INSERT INTO cards (id, deck_id, front_text, back_text) VALUES (gen_random_uuid(), ?::uuid, 'Q', 'A')",
+            deck2Id
+        )
+        jdbcTemplate.update(
+            "INSERT INTO cards (id, deck_id, front_text, back_text) VALUES (gen_random_uuid(), ?::uuid, 'Q', 'A')",
+            deck3Id
+        )
+
+        // Update decks with last_studied_at timestamps directly
+        jdbcTemplate.update(
+            "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+            java.sql.Timestamp.valueOf("2026-01-24 10:00:00"), deck1Id
+        )
+        jdbcTemplate.update(
+            "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+            java.sql.Timestamp.valueOf("2026-01-26 14:00:00"), deck2Id
+        )
+        jdbcTemplate.update(
+            "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+            java.sql.Timestamp.valueOf("2026-01-25 12:00:00"), deck3Id
+        )
+
+        // Get recent decks - should return in order: Most Recent, Middle, Oldest
+        mockMvc.perform(get("/api/v1/decks/recent"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(3))
+            .andExpect(jsonPath("$[0].name").value("Most Recent"))
+            .andExpect(jsonPath("$[1].name").value("Middle Studied"))
+            .andExpect(jsonPath("$[2].name").value("Oldest Studied"))
+    }
+
+    @Test
+    fun `get recent decks with limit returns only specified number of decks`() {
+        // Create 4 decks with study history
+        for (i in 1..4) {
+            val result = mockMvc.perform(
+                post("/api/v1/decks")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"name": "Deck $i"}""")
+            ).andReturn()
+            val deckId = com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(result.response.contentAsString)["id"].asText()
+
+            // Add card and study session
+            jdbcTemplate.update(
+                "INSERT INTO cards (id, deck_id, front_text, back_text) VALUES (gen_random_uuid(), ?::uuid, 'Q', 'A')",
+                deckId
+            )
+            jdbcTemplate.update(
+                "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+                java.sql.Timestamp.valueOf("2026-01-2${i} 10:00:00"), deckId
+            )
+        }
+
+        mockMvc.perform(get("/api/v1/decks/recent?limit=2"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(2))
+    }
+
+    @Test
+    fun `get recent decks default limit is 3`() {
+        // Create 5 decks with study history
+        for (i in 1..5) {
+            val result = mockMvc.perform(
+                post("/api/v1/decks")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"name": "Deck $i"}""")
+            ).andReturn()
+            val deckId = com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(result.response.contentAsString)["id"].asText()
+
+            jdbcTemplate.update(
+                "INSERT INTO cards (id, deck_id, front_text, back_text) VALUES (gen_random_uuid(), ?::uuid, 'Q', 'A')",
+                deckId
+            )
+            jdbcTemplate.update(
+                "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+                java.sql.Timestamp.valueOf("2026-01-2${i} 10:00:00"), deckId
+            )
+        }
+
+        mockMvc.perform(get("/api/v1/decks/recent"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(3))
+    }
+
+    @Test
+    fun `get recent decks with limit exceeding 10 returns 400`() {
+        mockMvc.perform(get("/api/v1/decks/recent?limit=11"))
+            .andExpect(status().isBadRequest)
+    }
+
+    @Test
+    fun `get recent decks with limit less than 1 returns 400`() {
+        mockMvc.perform(get("/api/v1/decks/recent?limit=0"))
+            .andExpect(status().isBadRequest)
+    }
+
+    @Test
+    fun `get recent decks excludes decks without lastStudiedAt`() {
+        // Create 2 studied decks and 1 unstudied deck
+        val studiedResult = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Studied Deck"}""")
+        ).andReturn()
+        val studiedId = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(studiedResult.response.contentAsString)["id"].asText()
+
+        mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Never Studied Deck"}""")
+        )
+
+        // Only add study session to one deck
+        jdbcTemplate.update(
+            "INSERT INTO cards (id, deck_id, front_text, back_text) VALUES (gen_random_uuid(), ?::uuid, 'Q', 'A')",
+            studiedId
+        )
+        jdbcTemplate.update(
+            "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+            java.sql.Timestamp.valueOf("2026-01-26 10:00:00"), studiedId
+        )
+
+        mockMvc.perform(get("/api/v1/decks/recent"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].name").value("Studied Deck"))
+    }
+
+    @Test
+    fun `get recent decks returns correct fields`() {
+        val result = mockMvc.perform(
+            post("/api/v1/decks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"name": "Test Deck", "type": "FLASH_REVIEW"}""")
+        ).andReturn()
+        val deckId = com.fasterxml.jackson.databind.ObjectMapper()
+            .readTree(result.response.contentAsString)["id"].asText()
+
+        // Add 3 cards
+        for (j in 1..3) {
+            jdbcTemplate.update(
+                "INSERT INTO cards (id, deck_id, front_text, back_text) VALUES (gen_random_uuid(), ?::uuid, 'Q$j', 'A$j')",
+                deckId
+            )
+        }
+
+        jdbcTemplate.update(
+            "UPDATE decks SET last_studied_at = ? WHERE id = ?::uuid",
+            java.sql.Timestamp.valueOf("2026-01-26 10:00:00"), deckId
+        )
+
+        mockMvc.perform(get("/api/v1/decks/recent"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$[0].id").value(deckId))
+            .andExpect(jsonPath("$[0].name").value("Test Deck"))
+            .andExpect(jsonPath("$[0].type").value("FLASH_REVIEW"))
+            .andExpect(jsonPath("$[0].cardCount").value(3))
+            .andExpect(jsonPath("$[0].lastStudiedAt").exists())
+            // Should NOT include createdAt and updatedAt per API spec
+            .andExpect(jsonPath("$[0].createdAt").doesNotExist())
+            .andExpect(jsonPath("$[0].updatedAt").doesNotExist())
     }
 }
