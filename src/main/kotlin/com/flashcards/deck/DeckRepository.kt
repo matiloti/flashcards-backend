@@ -26,13 +26,11 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
     fun findAll(): List<Deck> {
         return jdbcTemplate.query(
             """
-            SELECT d.id, d.name, d.deck_type, d.created_at, d.updated_at,
-                   COUNT(DISTINCT c.id) AS card_count,
-                   MAX(ss.completed_at) AS last_studied_at
+            SELECT d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at,
+                   COUNT(DISTINCT c.id) AS card_count
             FROM decks d
             LEFT JOIN cards c ON c.deck_id = d.id
-            LEFT JOIN study_sessions ss ON d.id = ss.deck_id AND ss.completed_at IS NOT NULL
-            GROUP BY d.id, d.name, d.deck_type, d.created_at, d.updated_at
+            GROUP BY d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at
             ORDER BY d.updated_at DESC
             """.trimIndent(),
             rowMapper
@@ -42,14 +40,12 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
     fun findById(id: UUID): Deck? {
         val results = jdbcTemplate.query(
             """
-            SELECT d.id, d.name, d.deck_type, d.created_at, d.updated_at,
-                   COUNT(DISTINCT c.id) AS card_count,
-                   MAX(ss.completed_at) AS last_studied_at
+            SELECT d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at,
+                   COUNT(DISTINCT c.id) AS card_count
             FROM decks d
             LEFT JOIN cards c ON c.deck_id = d.id
-            LEFT JOIN study_sessions ss ON d.id = ss.deck_id AND ss.completed_at IS NOT NULL
             WHERE d.id = ?
-            GROUP BY d.id, d.name, d.deck_type, d.created_at, d.updated_at
+            GROUP BY d.id, d.name, d.deck_type, d.last_studied_at, d.created_at, d.updated_at
             """.trimIndent(),
             rowMapper,
             id
@@ -78,5 +74,53 @@ class DeckRepository(private val jdbcTemplate: JdbcTemplate) {
     fun delete(id: UUID): Boolean {
         val deleted = jdbcTemplate.update("DELETE FROM decks WHERE id = ?", id)
         return deleted > 0
+    }
+
+    /**
+     * Find recently studied decks ordered by lastStudiedAt DESC.
+     * Only returns decks that have been studied (lastStudiedAt IS NOT NULL).
+     *
+     * @param limit Maximum number of decks to return (1-10)
+     * @return List of RecentDeck DTOs without createdAt/updatedAt fields
+     */
+    fun findRecentlyStudied(limit: Int): List<RecentDeck> {
+        return jdbcTemplate.query(
+            """
+            SELECT d.id, d.name, d.deck_type, d.last_studied_at,
+                   COUNT(DISTINCT c.id) AS card_count
+            FROM decks d
+            LEFT JOIN cards c ON c.deck_id = d.id
+            WHERE d.last_studied_at IS NOT NULL
+            GROUP BY d.id, d.name, d.deck_type, d.last_studied_at
+            ORDER BY d.last_studied_at DESC
+            LIMIT ?
+            """.trimIndent(),
+            { rs, _ ->
+                RecentDeck(
+                    id = UUID.fromString(rs.getString("id")),
+                    name = rs.getString("name"),
+                    type = DeckType.valueOf(rs.getString("deck_type")),
+                    cardCount = rs.getInt("card_count"),
+                    lastStudiedAt = rs.getTimestamp("last_studied_at").toInstant()
+                )
+            },
+            limit
+        )
+    }
+
+    /**
+     * Update the lastStudiedAt timestamp for a deck.
+     * Called when a study or flash review session is completed.
+     *
+     * @param id Deck ID
+     * @param lastStudiedAt Timestamp of session completion
+     * @return true if deck was updated, false if deck not found
+     */
+    fun updateLastStudiedAt(id: UUID, lastStudiedAt: Instant): Boolean {
+        val updated = jdbcTemplate.update(
+            "UPDATE decks SET last_studied_at = ? WHERE id = ?",
+            java.sql.Timestamp.from(lastStudiedAt), id
+        )
+        return updated > 0
     }
 }
