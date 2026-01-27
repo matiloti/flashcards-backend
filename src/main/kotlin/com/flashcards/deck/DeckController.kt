@@ -13,6 +13,29 @@ class DeckController(private val repository: DeckRepository) {
         return ResponseEntity.ok(repository.findAll())
     }
 
+    /**
+     * Get recently studied decks for the "Continue Studying" section.
+     * Returns decks ordered by lastStudiedAt DESC, excluding decks that have never been studied.
+     *
+     * @param limit Maximum number of decks to return (1-10, default 3)
+     * @return List of RecentDeck DTOs (without createdAt/updatedAt)
+     */
+    @GetMapping("/recent")
+    fun listRecentDecks(
+        @RequestParam(defaultValue = "3") limit: Int
+    ): ResponseEntity<Any> {
+        if (limit < 1 || limit > 10) {
+            return ResponseEntity.badRequest().body(
+                mapOf(
+                    "status" to 400,
+                    "error" to "Bad Request",
+                    "message" to "limit must be between 1 and 10"
+                )
+            )
+        }
+        return ResponseEntity.ok(repository.findRecentlyStudied(limit))
+    }
+
     @GetMapping("/{deckId}")
     fun getDeck(@PathVariable deckId: java.util.UUID): ResponseEntity<Deck> {
         val deck = repository.findById(deckId) ?: return ResponseEntity.notFound().build()
