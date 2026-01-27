@@ -32,12 +32,25 @@ class StudyControllerTest {
     private lateinit var deckId: String
     private lateinit var cardId: String
 
+    private val sentinelUserId = java.util.UUID.fromString("00000000-0000-0000-0000-000000000001")
+
     @BeforeEach
     fun setup() {
         jdbcTemplate.execute("DELETE FROM card_reviews")
+        jdbcTemplate.execute("DELETE FROM card_progress")
         jdbcTemplate.execute("DELETE FROM study_sessions")
         jdbcTemplate.execute("DELETE FROM cards")
         jdbcTemplate.execute("DELETE FROM decks")
+        jdbcTemplate.execute("DELETE FROM daily_study_stats")
+        jdbcTemplate.execute("DELETE FROM user_statistics")
+
+        // Ensure sentinel user_statistics row exists
+        jdbcTemplate.update(
+            """INSERT INTO user_statistics (id, current_streak, longest_streak, total_cards_studied,
+               total_study_time_minutes, total_sessions) VALUES (?, 0, 0, 0, 0, 0)
+               ON CONFLICT (id) DO NOTHING""",
+            sentinelUserId
+        )
 
         // Create a deck
         val deckResult = mockMvc.perform(
@@ -224,5 +237,206 @@ class StudyControllerTest {
         mockMvc.perform(get("/api/v1/decks/$deckId"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.lastStudiedAt").value(completedAt))
+    }
+
+    // =========================================================================
+    // Statistics tracking tests
+    // =========================================================================
+
+    @Test
+    fun `complete session updates user_statistics totals`() {
+        // Start session
+        val sessionResult = mockMvc.perform(
+            post("/api/v1/decks/$deckId/study")
+        ).andReturn()
+        val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+        // Submit review
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/reviews")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"cardId": "$cardId", "rating": "EASY"}""")
+        )
+
+        // Complete session
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/complete")
+        )
+            .andExpect(status().isOk)
+
+        // Verify user_statistics was updated
+        val stats = jdbcTemplate.queryForMap(
+            "SELECT total_cards_studied, total_sessions FROM user_statistics WHERE id = ?",
+            sentinelUserId
+        )
+
+        org.assertj.core.api.Assertions.assertThat(stats["total_cards_studied"]).isEqualTo(1)
+        org.assertj.core.api.Assertions.assertThat(stats["total_sessions"]).isEqualTo(1)
+    }
+
+    @Test
+    fun `complete session creates daily_study_stats entry`() {
+        // Start session
+        val sessionResult = mockMvc.perform(
+            post("/api/v1/decks/$deckId/study")
+        ).andReturn()
+        val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+        // Submit reviews with different ratings
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/reviews")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"cardId": "$cardId", "rating": "EASY"}""")
+        )
+
+        // Complete session
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/complete")
+        )
+            .andExpect(status().isOk)
+
+        // Verify daily_study_stats was created for today
+        val today = java.time.LocalDate.now()
+        val count = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM daily_study_stats WHERE study_date = ?",
+            Int::class.java,
+            java.sql.Date.valueOf(today)
+        )
+
+        org.assertj.core.api.Assertions.assertThat(count).isEqualTo(1)
+    }
+
+    @Test
+    fun `submit review updates card_progress`() {
+        // Start session
+        val sessionResult = mockMvc.perform(
+            post("/api/v1/decks/$deckId/study")
+        ).andReturn()
+        val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+        // Submit EASY review
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/reviews")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"cardId": "$cardId", "rating": "EASY"}""")
+        )
+            .andExpect(status().isCreated)
+
+        // Verify card_progress was created/updated
+        val progress = jdbcTemplate.queryForMap(
+            "SELECT consecutive_easy_count, mastery_level, last_rating FROM card_progress WHERE card_id = ?::uuid",
+            cardId
+        )
+
+        org.assertj.core.api.Assertions.assertThat(progress["consecutive_easy_count"]).isEqualTo(1)
+        org.assertj.core.api.Assertions.assertThat(progress["last_rating"]).isEqualTo("EASY")
+        org.assertj.core.api.Assertions.assertThat(progress["mastery_level"]).isEqualTo("LEARNING")
+    }
+
+    @Test
+    fun `consecutive EASY ratings leads to MASTERED status`() {
+        // Create multiple cards
+        mockMvc.perform(
+            post("/api/v1/decks/$deckId/cards")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"frontText": "Q2", "backText": "A2"}""")
+        )
+
+        // Do 3 sessions with EASY rating for the first card
+        repeat(3) {
+            val sessionResult = mockMvc.perform(
+                post("/api/v1/decks/$deckId/study")
+            ).andReturn()
+            val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+            // Submit EASY for the first card
+            mockMvc.perform(
+                post("/api/v1/study/$sessionId/reviews")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"cardId": "$cardId", "rating": "EASY"}""")
+            )
+
+            mockMvc.perform(
+                post("/api/v1/study/$sessionId/complete")
+            )
+        }
+
+        // Verify card is now MASTERED
+        val masteryLevel = jdbcTemplate.queryForObject(
+            "SELECT mastery_level FROM card_progress WHERE card_id = ?::uuid",
+            String::class.java,
+            cardId
+        )
+
+        org.assertj.core.api.Assertions.assertThat(masteryLevel).isEqualTo("MASTERED")
+    }
+
+    @Test
+    fun `HARD rating resets consecutive_easy_count`() {
+        // Submit 2 EASY ratings
+        repeat(2) {
+            val sessionResult = mockMvc.perform(
+                post("/api/v1/decks/$deckId/study")
+            ).andReturn()
+            val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+            mockMvc.perform(
+                post("/api/v1/study/$sessionId/reviews")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"cardId": "$cardId", "rating": "EASY"}""")
+            )
+            mockMvc.perform(post("/api/v1/study/$sessionId/complete"))
+        }
+
+        // Now submit HARD
+        val sessionResult = mockMvc.perform(
+            post("/api/v1/decks/$deckId/study")
+        ).andReturn()
+        val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/reviews")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"cardId": "$cardId", "rating": "HARD"}""")
+        )
+
+        // Verify consecutive_easy_count is reset to 0
+        val count = jdbcTemplate.queryForObject(
+            "SELECT consecutive_easy_count FROM card_progress WHERE card_id = ?::uuid",
+            Int::class.java,
+            cardId
+        )
+
+        org.assertj.core.api.Assertions.assertThat(count).isEqualTo(0)
+    }
+
+    @Test
+    fun `statistics are visible via statistics API after session`() {
+        // Start session
+        val sessionResult = mockMvc.perform(
+            post("/api/v1/decks/$deckId/study")
+        ).andReturn()
+        val sessionId = objectMapper.readTree(sessionResult.response.contentAsString)["sessionId"].asText()
+
+        // Submit review
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/reviews")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"cardId": "$cardId", "rating": "EASY"}""")
+        )
+
+        // Complete session
+        mockMvc.perform(
+            post("/api/v1/study/$sessionId/complete")
+        )
+            .andExpect(status().isOk)
+
+        // Verify statistics API shows the data
+        mockMvc.perform(get("/api/v1/statistics/overview"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.allTime.totalCardsStudied").value(1))
+            .andExpect(jsonPath("$.allTime.totalSessions").value(1))
+            .andExpect(jsonPath("$.today.cardsStudied").value(1))
+            .andExpect(jsonPath("$.today.sessionsCompleted").value(1))
     }
 }

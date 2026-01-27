@@ -2,16 +2,20 @@ package com.flashcards.study
 
 import com.flashcards.card.CardRepository
 import com.flashcards.deck.DeckRepository
+import com.flashcards.statistics.StatisticsService
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @RestController
 class StudyController(
     private val studyRepository: StudyRepository,
     private val cardRepository: CardRepository,
-    private val deckRepository: DeckRepository
+    private val deckRepository: DeckRepository,
+    private val statisticsService: StatisticsService
 ) {
 
     @PostMapping("/api/v1/decks/{deckId}/study")
@@ -47,6 +51,14 @@ class StudyController(
             ?: return ResponseEntity.notFound().build()
 
         val review = studyRepository.createReview(sessionId, request.cardId, request.rating)
+
+        // Update card progress for statistics tracking
+        statisticsService.recordCardReview(
+            cardId = request.cardId,
+            rating = request.rating.name,
+            reviewedAt = review.reviewedAt
+        )
+
         val response = ReviewResponse(
             id = review.id,
             sessionId = review.sessionId,
@@ -72,15 +84,31 @@ class StudyController(
 
         val counts = studyRepository.getReviewCounts(sessionId)
 
+        val easyCount = counts[Rating.EASY] ?: 0
         val hardCount = counts[Rating.HARD] ?: 0
         val againCount = counts[Rating.AGAIN] ?: 0
+        val totalCards = counts.values.sum()
+
+        // Calculate session duration in minutes
+        val durationMinutes = ChronoUnit.MINUTES.between(session.startedAt, completedAt).toInt()
+            .coerceAtLeast(1) // Minimum 1 minute
+
+        // Update statistics (using UTC for now; timezone handling could be added)
+        statisticsService.recordSessionCompletion(
+            cardsStudied = totalCards,
+            easyCount = easyCount,
+            hardCount = hardCount,
+            againCount = againCount,
+            sessionDurationMinutes = durationMinutes,
+            zoneId = ZoneId.of("UTC")
+        )
 
         val summary = SessionSummary(
             sessionId = sessionId,
             deckId = session.deckId,
             deckName = deck.name,
-            totalCards = counts.values.sum(),
-            easyCount = counts[Rating.EASY] ?: 0,
+            totalCards = totalCards,
+            easyCount = easyCount,
             hardCount = hardCount,
             againCount = againCount,
             missedCount = hardCount + againCount,
